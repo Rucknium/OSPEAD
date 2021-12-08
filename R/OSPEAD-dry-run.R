@@ -15,19 +15,31 @@ theta_i <- merge(data.frame(Var1 = 1:max(theta_i)), theta_i, all.x = TRUE)
 theta_i <- theta_i$Freq
 theta_i[is.na(theta_i)] <- 0
 support <- 1:max(xmr.Moser$spend_times_blocks)
+spend_times_blocks <- log(xmr.Moser$spend_times_blocks + 1)
+# offset is 2 to avoid zeroes later on
 
+
+param.trans <- list()
 
 f_D.gamma <- function(param, support) {
   stats::dgamma(log(support), shape = exp(param[1]), rate = exp(param[2]))
 }
 
+param.trans$gamma <- c(exp, exp)
+
 f_D.lnorm <- function(param, support) {
   stats::dlnorm(log(support), meanlog = param[1], sdlog = exp(param[2]))
 }
 
+param.trans$lnorm <- c(I, exp)
+
 f_D.f <- function(param, support) {
   stats::df(log(support), df1 = exp(param[1]), df2 = exp(param[2]), ncp = exp(param[3]) )
 }
+
+param.trans$f <- c(exp, exp, exp)
+
+
 
 L_FGT <- function(param, f_D, support, flavor = 1) {
   alpha <- flavor
@@ -54,15 +66,29 @@ L_Welfare <- function(param, f_D, support, flavor = 1) {
     , na.rm = TRUE )
 }
 
+L_MLE <- function(param, f_D, ...) {
+  (-1) * sum(
+  log( f_D(param, spend_times_blocks + 1) )
+    , na.rm = TRUE)
+}
+
+
+
+
 
 run.iters <- expand.grid(
   f_D = c(f_D.gamma = f_D.gamma, f_D.lnorm = f_D.lnorm, f_D.f = f_D.f), 
   flavor = 1:2,
-  L = c(L_FGT = L_FGT, L_Welfare = L_Welfare)
+  L = c(L_FGT = L_FGT, L_Welfare = L_Welfare, L_MLE = L_MLE)
 )
 
 run.iters$flavor[names(run.iters$L) == "L_Welfare"] <- 
   rep(c(1, 5), each = sum(names(run.iters$L) == "L_Welfare")/2)
+
+run.iters$flavor[names(run.iters$L) == "L_MLE"] <- 0
+# MLE has only one flavor
+
+run.iters <- unique(run.iters)
 
 start.params <- list(
   f_D.gamma = c(1, 1), 
@@ -108,6 +134,43 @@ for (i in 1:nrow(run.iters.results)) {
   ]]$value
 }
 
+families <- colnames(run.iters.results)[grepl("f_D", colnames(run.iters.results))]
+
+for (family in families) {
+  run.iters.results[run.iters.results$L == "L_MLE", family] <- 
+    2 * length(param.trans[[ gsub("f_D[.]", "", family) ]]) +
+    2 * run.iters.results[run.iters.results$L == "L_MLE", family]
+}
+# AIC formula. Note that the value is the neagtive of the 
+# log likelihood already, so just need to add
+
+
+
+write.csv(run.iters.results, "tables/dry-run/performance.csv", row.names = FALSE)
+
+
+
+minimizer.params <- data.frame(f_D = names(run.iters[[1]]), L = names(run.iters[[3]]), flavor = run.iters[[2]],
+  param_1 = NA, param_2 = NA, param_3 = NA, stringsAsFactors = FALSE)
+
+minimizer.params$f_D <- gsub("f_D[.]", "", minimizer.params$f_D)
+
+for ( i in 1:nrow(minimizer.params)) {
+  
+  temp.param.value <- results[[i]]$par
+  
+  for ( j in 1:length(temp.param.value)) {
+    temp.param.value[j] <- param.trans[[minimizer.params[i, "f_D"]]][[j]](temp.param.value[j])
+  }
+  
+  minimizer.params[i, paste0("param_", seq_along(results[[i]]$par))] <- temp.param.value
+    
+}
+
+minimizer.params <- minimizer.params[order(minimizer.params$f_D), ]
+
+write.csv(minimizer.params, "tables/dry-run/minimizer-params.csv", row.names = FALSE)
+
 
 run.iters.obj.fn <- unique(run.iters[, c("L", "flavor")])
 run.iters.obj.fn$L <- names(run.iters.obj.fn$L)
@@ -122,6 +185,9 @@ run.iters.obj.fn$title[run.iters.obj.fn$L == "L_Welfare" & run.iters.obj.fn$flav
   bquote(L[Welfare][eta] ~ "," ~ eta == 1)
 run.iters.obj.fn$title[run.iters.obj.fn$L == "L_Welfare" & run.iters.obj.fn$flavor == 5][[1]] <-
   bquote(L[Welfare][eta] ~ "," ~ eta == 5)
+
+run.iters.obj.fn$title[run.iters.obj.fn$L == "L_MLE"][[1]] <-
+  bquote(L[MLE])
 
 
 distn.name.converter <- c(
