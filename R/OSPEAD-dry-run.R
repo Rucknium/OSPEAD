@@ -1,7 +1,7 @@
 
 # install.packages("readr")
 
-xmr.Moser <- as.data.frame(readr::read_csv("data/log_spend_times.csv.xz"))
+xmr.Moser <- as.data.frame(readr::read_csv("data-raw/log_spend_times.csv.xz"))
 # Data from Moser et al. (2018) "An Empirical Analysis of Traceability in the Monero Blockchain"
 
 xmr.Moser$spend_times_seconds <- exp(xmr.Moser$log_spend_times)
@@ -15,7 +15,7 @@ theta_i <- merge(data.frame(Var1 = 1:max(theta_i)), theta_i, all.x = TRUE)
 theta_i <- theta_i$Freq
 theta_i[is.na(theta_i)] <- 0
 support <- 1:max(xmr.Moser$spend_times_blocks)
-spend_times_blocks <- log(xmr.Moser$spend_times_blocks + 1)
+spend_times_blocks <- xmr.Moser$spend_times_blocks
 # offset is 2 to avoid zeroes later on
 
 
@@ -43,9 +43,9 @@ param.trans$f <- c(exp, exp, exp)
 
 L_FGT <- function(param, f_D, support, flavor = 1) {
   alpha <- flavor
-  a_i <- f_D(param, support)
+  a_i <- f_D(param, support + 1)
   a_i <- a_i/sum(a_i)
-  sum( (a_i < theta_i & theta_i > 0) * theta_i * ((theta_i - a_i)/theta_i)^alpha , na.rm = TRUE )
+  sum( (theta_i * ((theta_i - a_i)/theta_i)^alpha)[a_i < theta_i & theta_i > 0] , na.rm = FALSE )
 }
 
 
@@ -62,14 +62,14 @@ L_Welfare <- function(param, f_D, support, flavor = 1) {
   a_i <- f_D(param, support + 1)
   a_i <- a_i/sum(a_i)
   (-1) * sum(  
-    (theta_i > 0) * theta_i * u_CRRA(ifelse(a_i/theta_i < 1, a_i/theta_i, 1), eta = eta )
-    , na.rm = TRUE )
+    (theta_i * u_CRRA(ifelse(a_i/theta_i < 1, a_i/theta_i, 1), eta = eta ))[theta_i > 0]
+    , na.rm = FALSE )
 }
 
 L_MLE <- function(param, f_D, ...) {
   (-1) * sum(
-  log( f_D(param, spend_times_blocks + 1) )
-    , na.rm = TRUE)
+  log( f_D(param, spend_times_blocks + 2) )
+    , na.rm = FALSE)
 }
 
 
