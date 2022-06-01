@@ -16,7 +16,14 @@ current.block.height <- NA_integer_
 n.threads <- min(c(6, parallelly::availableCores()))
 # Recommended no more than 6 threads since all threads query the single blockchain daemon process.
 
+
 blockchain.config <- rbch::conrpc(blockchain.conf.file)
+rpcport <- readLines(blockchain.conf.file)
+rpcport <- rpcport[grepl("rpcport", rpcport) ]
+if (length(rpcport) > 0) {
+  blockchain.config@url <- paste0("http://127.0.0.1:", gsub("[^0-9]", "", rpcport))
+}
+
 
 
 getblock.doge <- function(con, blockhash, verbosity = TRUE) {
