@@ -4,6 +4,7 @@
 # install.packages("distributionsrd")
 # install.packages("future.apply")
 # install.packages("RColorBrewer")
+# install.packages("VGAM")
 
 xmr.Moser <- as.data.frame(readr::read_csv("data-raw/log_spend_times.csv.xz"))
 # Data from Moser et al. (2018) "An Empirical Analysis of Traceability in the Monero Blockchain"
@@ -26,7 +27,8 @@ rm(xmr.Moser)
 param.trans <- list()
 
 f_D.lgamma <- function(param, support, return.log = FALSE) {
-  actuar::dlgamma(support + 1, shapelog = exp(param[1]), ratelog = exp(param[2]), log = return.log)
+  support.p1 <- support + 1
+  actuar::dlgamma(support.p1, shapelog = exp(param[1]), ratelog = exp(param[2]), log = return.log)
 }
 
 param.trans$lgamma <- c(exp, exp)
@@ -45,49 +47,102 @@ f_D.rpln <- function(param, support, return.log = FALSE) {
 
 param.trans$rpln <- c(exp, I, exp)
 
+f_D.gev <- function(param, support, return.log = FALSE) {
+  VGAM::dgev(support, location = param[1], scale = exp(param[2]), shape = param[3], log = return.log)
+}
+
+param.trans$gev <- c(I, exp, I)
+
+
 atan.0.1 <- function(x) { atan(x)/pi + 0.5 }
 
+
 f_D.lgamma.f.mix <- function(param, support, return.log = FALSE) {
+
   atan.0.1(param[1]) * f_D.lgamma(param[2:3], support, return.log = return.log) + 
     (1 - atan.0.1(param[1])) * f_D.f(param[4:6], support, return.log = return.log)
 }
 
 param.trans$lgamma.f.mix <- c(atan.0.1, exp, exp, exp, exp, exp)
 
+f_D.gev.f.mix <- function(param, support, return.log = FALSE) {
 
-f_D.lgamma.cosine <- function(param, support, return.log = FALSE) {
-  density.x <- actuar::dlgamma(support + 1, shapelog = exp(param[1]), ratelog = exp(param[2]), log = return.log)
-  
-  density.x + atan.0.1(param[3]) * density.x * cos(support * pi * 2 / (24 * 30))
+  atan.0.1(param[1]) * f_D.gev(param[2:4], support, return.log = return.log) + 
+    (1 - atan.0.1(param[1])) * f_D.f(param[5:7], support, return.log = return.log)
 }
 
-param.trans$lgamma.cosine <- c(exp, exp, atan.0.1)
+param.trans$f_D.gev.f.mix <- c(atan.0.1, I, exp, I, exp, exp, exp)
+
+# DONT USE COSINE:
+
+# f_D.lgamma.cosine <- function(param, support, return.log = FALSE) {
+#   density.x <- actuar::dlgamma(support + 1, shapelog = exp(param[1]), ratelog = exp(param[2]), log = return.log)
+  
+#   density.x + atan.0.1(param[3]) * density.x * cos(support * pi * 2 / (24 * 30))
+# }
+
+# param.trans$lgamma.cosine <- c(exp, exp, atan.0.1)
+
+
+
+
+f_D.lgamma.periodic.laplace <- function(param, support, return.log = FALSE) {
+  
+  laplace.multiplier <- 
+    (2 * 24 * 30) / sum(VGAM::dlaplace((support + 1) %% (2 *24 * 30), location = 24 * 30, scale = exp(param[4]), log = return.log)[1:(2 * 24 * 30)])
+  
+  density.x <- actuar::dlgamma(support + 1, shapelog = exp(param[1]), ratelog = exp(param[2]), log = return.log)
+  
+  (1 - atan.0.1(param[3])) * density.x + atan.0.1(param[3]) * density.x * laplace.multiplier * 
+    VGAM::dlaplace((support + 1) %% (2 *24 * 30), location = 24 * 30, scale = exp(param[4]), log = return.log)
+}
+
+# TODO: The above actually has a period of two days since it fits better with the Moser data. 1-day period would be:
+
+# f_D.lgamma.periodic.laplace <- function(param, support, return.log = FALSE) {
+  
+#   laplace.multiplier <- 
+#     (24 * 30) / sum(VGAM::dlaplace((support + 1 + (24 * 30 / 2)) %% (24 * 30), location = 24 * 30 / 2, scale = param[4], log = return.log)[1:(24 * 30)])
+  
+#   density.x <- actuar::dlgamma(support + 1, shapelog = exp(param[1]), ratelog = exp(param[2]), log = return.log)
+  
+#   (1 - atan.0.1(param[3])) * density.x + atan.0.1(param[3]) * density.x * laplace.multiplier * 
+#     VGAM::dlaplace((support + 1 + (24 * 30 / 2)) %% (24 * 30), location = 24 * 30 / 2, scale = param[4], log = return.log)
+    # }
+
+param.trans$f_D.lgamma.periodic.laplace <- c(exp, exp, atan.0.1, exp)
 
 distn.name.converter <- c(
   "f_D.lgamma" = "Log-gamma",
   "f_D.f" = "F",
   "f_D.rpln" = "Right-Pareto Log-normal",
+  "f_D.gev" = "Generalized Extreme Value",
   "f_D.lgamma.f.mix" = "Log-gamma + F Mixture",
-  "f_D.lgamma.cosine" = "Log-gamma Cosine"
+  "f_D.gev.f.mix" = "Generalized Extreme Value + F Mixture",
+  "f_D.lgamma.periodic.laplace" = "Log-gamma + Periodic Laplace"
+  #"f_D.lgamma.cosine" = "Log-gamma Cosine"
 )
 
 
-L_FGT <- function(param, f_D, support, flavor = 1) {
+L_FGT <- function(param, f_D, support, flavor = 1, theta_i, ...) {
   alpha <- flavor
   a_i <- f_D(param, support)
   a_i <- a_i/sum(a_i)
   sum( (theta_i * ((theta_i - a_i)/theta_i)^alpha)[a_i < theta_i & theta_i > 0] , na.rm = FALSE )
 }
 
-u_CRRA <- function(x, eta) {
-  if (eta != 1) {
-    return( (x^(1 - eta)) / (1 - eta)  )
-  } else {
-    return(log(x))
-  }
-}
 
-L_Welfare <- function(param, f_D, support, flavor = 1) {
+
+L_Welfare <- function(param, f_D, support, flavor = 1, theta_i, ...) {
+  
+  u_CRRA <- function(x, eta) {
+    if (eta != 1) {
+      return( (x^(1 - eta)) / (1 - eta)  )
+    } else {
+      return(log(x))
+    }
+  }
+  
   eta <- flavor
   a_i <- f_D(param, support)
   a_i <- a_i/sum(a_i)
@@ -96,41 +151,43 @@ L_Welfare <- function(param, f_D, support, flavor = 1) {
     , na.rm = FALSE )
 }
 
-L_MLE <- function(param, f_D, ...) {
+L_MLE <- function(param, f_D, spend_times_blocks = spend_times_blocks, ...) {
   (-1) * sum(
   f_D(param, spend_times_blocks, return.log = TRUE) 
     , na.rm = FALSE)
 }
 
 
-run.iters <- expand.grid(
-  f_D = c(f_D.lgamma = f_D.lgamma, f_D.f = f_D.f, f_D.rpln = f_D.rpln), 
+run.iters.simple <- expand.grid(
+  f_D = c(f_D.lgamma = f_D.lgamma, f_D.f = f_D.f, f_D.rpln = f_D.rpln, f_D.gev = f_D.gev), 
   flavor = 1:2,
   L = c(L_FGT = L_FGT, L_Welfare = L_Welfare, L_MLE = L_MLE)
 )
 
-run.iters$flavor[names(run.iters$L) == "L_Welfare"] <- 
-  rep(c(0.5, 1), each = sum(names(run.iters$L) == "L_Welfare")/2)
+run.iters.simple$flavor[names(run.iters.simple$L) == "L_Welfare"] <- 
+  rep(c(0.5, 1), each = sum(names(run.iters.simple$L) == "L_Welfare")/2)
 
-run.iters$flavor[names(run.iters$L) == "L_MLE"] <- 0
+run.iters.simple$flavor[names(run.iters.simple$L) == "L_MLE"] <- 0
 # MLE has only one flavor
 
-run.iters <- unique(run.iters)
+run.iters.simple <- unique(run.iters.simple)
 
 
 start.params <- list(
   f_D.lgamma = c(2, 0), 
   f_D.f = c(-1, 0, 2), 
-  f_D.rpln = c(0.5, 2, 1))
+  f_D.rpln = c(0.5, 2, 1),
+  f_D.gev = c(100, log(100), 1))
+
 
 future::plan(future::multiprocess())
 
-results <- future.apply::future_lapply(1:nrow(run.iters), function(iter) {
+results.simple <- future.apply::future_lapply(1:nrow(run.iters.simple), function(iter) {
   
-  f_D.fun <- run.iters$f_D[[iter]]
-  L.fun <- run.iters$L[[iter]]
-  flavor <- run.iters$flavor[[iter]]
-  start.params.optim <- start.params[[names(run.iters$f_D[iter])]]
+  f_D.fun <- run.iters.simple$f_D[[iter]]
+  L.fun <- run.iters.simple$L[[iter]]
+  flavor <- run.iters.simple$flavor[[iter]]
+  start.params.optim <- start.params[[names(run.iters.simple$f_D[iter])]]
   
   optim(
     start.params.optim,
@@ -138,38 +195,48 @@ results <- future.apply::future_lapply(1:nrow(run.iters), function(iter) {
     f_D = f_D.fun,
     support = as.numeric(support), 
     flavor = flavor,
-    control = list(trace = 6, maxit = 10000))
+    control = list(trace = 6, maxit = 10000),
+    theta_i = theta_i,
+    spend_times_blocks = spend_times_blocks)
 
 })
 
 
 
-
 run.iters.mix <- expand.grid(
-  f_D = c(f_D.lgamma.f.mix = f_D.lgamma.f.mix), 
+  f_D = c(
+    f_D.lgamma.f.mix = f_D.lgamma.f.mix,
+    f_D.gev.f.mix = f_D.gev.f.mix), 
   flavor = 1:2,
   L = c(L_FGT = L_FGT, L_Welfare = L_Welfare)
 )
+
+
 
 run.iters.mix$flavor[names(run.iters.mix$L) == "L_Welfare"] <- 
   rep(c(0.5, 1), each = sum(names(run.iters.mix$L) == "L_Welfare")/2)
 
 # run.iters.mix$flavor[names(run.iters.mix$L) == "L_MLE"] <- 0
 
-
 results.mix <- future.apply::future_lapply(1:nrow(run.iters.mix), function(iter) {
   
   f_D.fun <- run.iters.mix$f_D[[iter]]
   L.fun <- run.iters.mix$L[[iter]]
   flavor <- run.iters.mix$flavor[[iter]]
+  
+  mixture.name <- names(run.iters.mix$f_D[iter])
+  mixture.name <- gsub("(f_D.)|(.mix)", "", mixture.name)
+  mixture.name <- strsplit(mixture.name, "[.]")[[1]]
+  # NOTE: Naming is crucial and order matters
+  
   start.params.optim <- c(0,
     results[[which(
-      names(run.iters$f_D) == "f_D.lgamma" &
+      names(run.iters$f_D) == paste0("f_D.", mixture.name[1]) &
       names(run.iters$L) == names(run.iters.mix$L[iter]) & 
       run.iters$flavor == run.iters.mix$flavor[iter]
         )]]$par,
     results[[which(
-      names(run.iters$f_D) == "f_D.f" &
+      names(run.iters$f_D) == paste0("f_D.", mixture.name[2]) &
         names(run.iters$L) == names(run.iters.mix$L[iter]) & 
         run.iters$flavor == run.iters.mix$flavor[iter]
     )]]$par
@@ -181,37 +248,48 @@ results.mix <- future.apply::future_lapply(1:nrow(run.iters.mix), function(iter)
     f_D = f_D.fun,
     support = as.numeric(support), 
     flavor = flavor,
-    control = list(trace = 6, maxit = 10000))
+    control = list(trace = 6, maxit = 10000),
+    theta_i = theta_i,
+    spend_times_blocks = spend_times_blocks,
+    atan.0.1 = atan.0.1,
+    f_D.lgamma = f_D.lgamma,
+    f_D.gev = f_D.gev,
+    f_D.f = f_D.f)
   
 })
 
 
 
-run.iters.cosine <- expand.grid(
-  f_D = c(f_D.lgamma.cosine = f_D.lgamma.cosine), 
+# run.iters.cosine <- expand.grid(
+#   f_D = c(f_D.lgamma.cosine = f_D.lgamma.cosine), 
+#   flavor = 1:2,
+#   L = c(L_FGT = L_FGT, L_Welfare = L_Welfare)
+# )
+
+run.iters.periodic <- expand.grid(
+  f_D = c(f_D.lgamma.periodic.laplace = f_D.lgamma.periodic.laplace), 
   flavor = 1:2,
   L = c(L_FGT = L_FGT, L_Welfare = L_Welfare)
 )
 
-run.iters.cosine$flavor[names(run.iters.cosine$L) == "L_Welfare"] <- 
-  rep(c(0.5, 1), each = sum(names(run.iters.cosine$L) == "L_Welfare")/2)
+run.iters.periodic$flavor[names(run.iters.periodic$L) == "L_Welfare"] <- 
+  rep(c(0.5, 1), each = sum(names(run.iters.periodic$L) == "L_Welfare")/2)
 
-# run.iters.cosine$flavor[names(run.iters.cosine$L) == "L_MLE"] <- 0
+# run.iters.periodic$flavor[names(run.iters.periodic$L) == "L_MLE"] <- 0
 
-
-
-results.cosine <- future.apply::future_lapply(1:nrow(run.iters.cosine), function(iter) {
+results.periodic <- future.apply::future_lapply(1:nrow(run.iters.periodic), function(iter) {
   
-  f_D.fun <- run.iters.cosine$f_D[[iter]]
-  L.fun <- run.iters.cosine$L[[iter]]
-  flavor <- run.iters.cosine$flavor[[iter]]
+  f_D.fun <- run.iters.periodic$f_D[[iter]]
+  L.fun <- run.iters.periodic$L[[iter]]
+  flavor <- run.iters.periodic$flavor[[iter]]
   start.params.optim <- c(
     results[[which(
       names(run.iters$f_D) == "f_D.lgamma" &
-        names(run.iters$L) == names(run.iters.cosine$L[iter]) & 
-        run.iters$flavor == run.iters.cosine$flavor[iter]
+        names(run.iters$L) == names(run.iters.periodic$L[iter]) & 
+        run.iters$flavor == run.iters.periodic$flavor[iter]
     )]]$par,
-    -25
+    -25, # atan.0.1-transformed mixing factor
+    log(24 * 30 / 2) # Scale parameter of the Laplace distribution
   )
   
   optim(
@@ -220,17 +298,18 @@ results.cosine <- future.apply::future_lapply(1:nrow(run.iters.cosine), function
     f_D = f_D.fun,
     support = as.numeric(support), 
     flavor = flavor,
-    control = list(trace = 6, maxit = 10000))
+    control = list(trace = 6, maxit = 10000),
+    theta_i = theta_i,
+    spend_times_blocks = spend_times_blocks,
+    atan.0.1 = atan.0.1)
   
 })
 
 
 
+run.iters <- rbind(run.iters.simple, run.iters.mix, run.iters.periodic)
 
-
-run.iters <- rbind(run.iters, run.iters.mix, run.iters.cosine)
-
-results <- c(results, results.mix, results.cosine)
+results <- c(results.simple, results.mix, results.periodic)
 
 run.iters.results <- unique(run.iters[, c("L", "flavor")])
 run.iters.results$L <- names(run.iters.results$L)
@@ -278,7 +357,9 @@ minimizer.params <- data.frame(f_D = names(run.iters[[1]]), L = names(run.iters[
 
 dists.to.exclude <- c(
   "f_D.lgamma.f.mix",
-  "f_D.lgamma.cosine"
+  "f_D.gev.f.mix",
+  "f_D.lgamma.periodic.laplace"
+  #"f_D.lgamma.cosine"
 )
 
 minimizer.params <- minimizer.params[ ! minimizer.params$f_D %in% dists.to.exclude, ]
@@ -298,6 +379,8 @@ for ( i in 1:nrow(minimizer.params)) {
 }
 
 minimizer.params <- minimizer.params[order(minimizer.params$f_D), ]
+
+minimizer.params
 
 write.csv(minimizer.params, "tables/dry-run/minimizer-params.csv", row.names = FALSE)
 
@@ -346,25 +429,25 @@ for (i in 1:nrow(run.iters.obj.fn)) {
   png(paste0("images/dry-run/estimate-div-target/estimate-div-target-", loss.fn.temp, "-flavor-", flavor.temp, ".png"), 
     width = 1000 * 1.5, height = 800 * 1.5)
   
-  par(mar = c(8, 6, 8, 2) + 0.1, cex = 1.5)
+  par(mar = c(8, 6, 10, 2) + 0.1, cex = 1.5)
   
   matplot(matrix(mat.data, nrow = length(support.interval)), 
     main = run.iters.obj.fn$title[i][[1]], 
     ylab = bquote(frac(f[D](x), f[S](x))),
-    xlab = "x",
-    log = "x", xaxt = "n",
+    xlab = "Age of spend outputs in terms of number of blocks. Log scale.",
+    log = "x", xaxt = "n", 
     type = "l", lty = 1, 
     ylim = c(min(c(0, mat.data)), min(c(2, max(mat.data)))), 
-    col = RColorBrewer::brewer.pal( length(unique(names(run.iters$f_D))), "Set1"))
+    col = (RColorBrewer::brewer.pal( length(unique(names(run.iters$f_D))) + 1, "Set1")[-6]))
   
   abline(h = 1, lty = 2)
   
   legend("top", 
     legend = legend.labels, 
     lty = rep(1, length(unique(names(run.iters$f_D)))), 
-    lwd = rep(5, length(unique(names(run.iters$f_D)))), 
-    col = RColorBrewer::brewer.pal( length(unique(names(run.iters$f_D))), "Set1"),
-    inset = c(0, -0.08), xpd = NA, y.intersp = 1,
+    lwd = rep(10, length(unique(names(run.iters$f_D)))), 
+    col = (RColorBrewer::brewer.pal( length(unique(names(run.iters$f_D))) + 1, "Set1")[-6]),
+    inset = c(0, -0.12), xpd = NA, y.intersp = 1,
     bty = "n", ncol = 3)
   
   for ( j in support.interval) {
@@ -410,25 +493,25 @@ for (i in 1:nrow(run.iters.obj.fn)) {
   png(paste0("images/dry-run/estimate/estimate-", loss.fn.temp, "-flavor-", flavor.temp, ".png"), 
     width = 1000 * 1.5, height = 800 * 1.5)
   
-  par(mar = c(8, 4, 8, 2) + 0.1, cex = 1.5)
+  par(mar = c(8, 6, 10, 2) + 0.1, cex = 1.5)
   
   matplot(matrix(mat.data, nrow = length(support.interval)), 
     main = run.iters.obj.fn$title[i][[1]], 
     ylab = bquote(f[D](x)),
-    xlab = "x",
+    xlab = "Age of spend outputs in terms of number of blocks. Log scale.",
     log = "x", xaxt = "n",
     type = "l", lty = 1, 
     ylim = c(min(c(0, mat.data)), min(c(2, max(mat.data)))), 
-    col = RColorBrewer::brewer.pal( length(unique(names(run.iters$f_D))), "Set1"))
+    col = (RColorBrewer::brewer.pal( length(unique(names(run.iters$f_D))) + 1, "Set1")[-6]))
   
   abline(h = 0, lty = 2)
   
   legend("top", 
     legend = legend.labels, 
     lty = rep(1, length(unique(names(run.iters$f_D)))), 
-    lwd = rep(5, length(unique(names(run.iters$f_D)))), 
-    col = RColorBrewer::brewer.pal( length(unique(names(run.iters$f_D))), "Set1"),
-    inset = c(0, -0.08), xpd = NA, y.intersp = 1,
+    lwd = rep(10, length(unique(names(run.iters$f_D)))), 
+    col = (RColorBrewer::brewer.pal( length(unique(names(run.iters$f_D))) + 1, "Set1")[-6]),
+    inset = c(0, -0.12), xpd = NA, y.intersp = 1,
     bty = "n", ncol = 3)
   
   for ( j in support.interval) {
