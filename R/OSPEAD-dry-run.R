@@ -5,6 +5,8 @@
 # install.packages("future.apply")
 # install.packages("RColorBrewer")
 # install.packages("VGAM")
+# install.packages("huxtable")
+library(huxtable)
 
 xmr.Moser <- as.data.frame(readr::read_csv("data-raw/log_spend_times.csv.xz"))
 # Data from Moser et al. (2018) "An Empirical Analysis of Traceability in the Monero Blockchain"
@@ -230,12 +232,12 @@ results.mix <- future.apply::future_lapply(1:nrow(run.iters.mix), function(iter)
   # NOTE: Naming is crucial and order matters
   
   start.params.optim <- c(0,
-    results[[which(
+    results.simple[[which(
       names(run.iters$f_D) == paste0("f_D.", mixture.name[1]) &
       names(run.iters$L) == names(run.iters.mix$L[iter]) & 
       run.iters$flavor == run.iters.mix$flavor[iter]
         )]]$par,
-    results[[which(
+    results.simple[[which(
       names(run.iters$f_D) == paste0("f_D.", mixture.name[2]) &
         names(run.iters$L) == names(run.iters.mix$L[iter]) & 
         run.iters$flavor == run.iters.mix$flavor[iter]
@@ -283,7 +285,7 @@ results.periodic <- future.apply::future_lapply(1:nrow(run.iters.periodic), func
   L.fun <- run.iters.periodic$L[[iter]]
   flavor <- run.iters.periodic$flavor[[iter]]
   start.params.optim <- c(
-    results[[which(
+    results.simple[[which(
       names(run.iters$f_D) == "f_D.lgamma" &
         names(run.iters$L) == names(run.iters.periodic$L[iter]) & 
         run.iters$flavor == run.iters.periodic$flavor[iter]
@@ -345,10 +347,43 @@ for (family in families) {
 
 run.iters.results
 
-
-
-
 write.csv(run.iters.results, "tables/dry-run/performance.csv", row.names = FALSE)
+
+hux.run.iters.results <- run.iters.results
+
+hux.run.iters.results$flavor[hux.run.iters.results$flavor == 0] <- NA
+
+colnames(hux.run.iters.results) <- c("Loss function", "Loss function parameter", "Log-gamma", "F", "Right-Pareto Log-normal", "Generalized Extreme Value", "Log-gamma + F mix", "Log-gamma + GEV mix", "Log-gamma + Laplace Periodic")
+
+hux.run.iters.results <- huxtable::as_hux(hux.run.iters.results)
+hux.run.iters.results <- t(hux.run.iters.results)
+hux.run.iters.results <- huxtable::set_bottom_border(hux.run.iters.results, row = 2)
+hux.run.iters.results <- huxtable::set_align(hux.run.iters.results, col = 1, value = "left")
+hux.run.iters.results <- huxtable::set_number_format(hux.run.iters.results, row = 3:9, col = 2:5, value = 4)
+
+YlGn.colors <- rev(RColorBrewer::brewer.pal(7, "YlGn"))
+
+for (iter in 1:5) {
+  if (iter == 5) {
+    hux.run.iters.results <- huxtable::set_background_color(hux.run.iters.results, 
+      col = 1 + iter, row = order(unlist(run.iters.results[iter, 3:6])) + 2, value = YlGn.colors[1:4])
+  } else {
+    hux.run.iters.results <- huxtable::set_background_color(hux.run.iters.results, 
+      col = 1 + iter, row = order(unlist(run.iters.results[iter, 3:9])) + 2, value = YlGn.colors)
+  }
+}
+
+hux.run.iters.results <- huxtable::add_footnote(hux.run.iters.results, 
+  text = "Note: Values should be compared down columns. Lower values (darker green) indicate better performance. MLE value is Akaike Information Criterion (AIC).")
+
+hux.run.iters.results <- huxtable::set_wrap(hux.run.iters.results, col = 1, row = 1:(nrow(hux.run.iters.results) - 1), value = FALSE)
+
+width(hux.run.iters.results) <- 1
+# Makes the cells wrap
+
+hux.run.iters.results <- huxtable::set_col_width(hux.run.iters.results, col = 2:6, value = (1/ncol(hux.run.iters.results)) * 0.8)
+
+cat(huxtable::to_latex(hux.run.iters.results), file = "tables/dry-run/performance.tex")
 
 
 
@@ -383,6 +418,39 @@ minimizer.params <- minimizer.params[order(minimizer.params$f_D), ]
 minimizer.params
 
 write.csv(minimizer.params, "tables/dry-run/minimizer-params.csv", row.names = FALSE)
+
+
+hux.minimizer.params <- minimizer.params
+
+hux.minimizer.params$f_D <- distn.name.converter[match(hux.minimizer.params$f_D, 
+  gsub("f_D.", "", names(distn.name.converter)))]
+
+colnames(hux.minimizer.params) <- c("Distribution", "Loss fn", "Loss fn param", "param_1", "param_2", "param_3")
+
+hux.minimizer.params <- huxtable::as_hux(hux.minimizer.params)
+
+hux.minimizer.params <- huxtable::set_wrap(hux.minimizer.params, col = 1, row = 1:(nrow(hux.minimizer.params)), value = FALSE)
+
+width(hux.minimizer.params) <- 0.95
+
+hux.minimizer.params <- huxtable::add_footnote(hux.minimizer.params, 
+  text = "F Distribution: param_1 is first degree of freedom parameter; param_2 is second degree of freedom parameter; param_3 is non-centrality parameter.")
+
+hux.minimizer.params <- huxtable::add_footnote(hux.minimizer.params, 
+  text = "Generalized Extreme Value Distribution: param_1 is location parameter; param_2 is scale parameter; param_3 is shape parameter.")
+
+hux.minimizer.params <- huxtable::add_footnote(hux.minimizer.params, 
+  text = "Log-gamma Distribution: param_1 is shape parameter; param_2 is rate parameter.")
+
+hux.minimizer.params <- huxtable::add_footnote(hux.minimizer.params, 
+  text = "Right-Pareto Log-normal Distribution: param_1 is shape parameter; param_2 is mean parameter; param_3 is variance parameter.")
+
+hux.minimizer.params <- huxtable::add_footnote(hux.minimizer.params, 
+  text = "Mixture distributions are omitted from this table.")
+
+
+cat(huxtable::to_latex(hux.minimizer.params), file = "tables/dry-run/minimizer-params.tex")
+
 
 
 run.iters.obj.fn <- unique(run.iters[, c("L", "flavor")])
