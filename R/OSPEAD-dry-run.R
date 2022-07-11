@@ -357,8 +357,8 @@ colnames(hux.run.iters.results) <- c("Loss function", "Loss function parameter",
 
 hux.run.iters.results <- huxtable::as_hux(hux.run.iters.results)
 hux.run.iters.results <- t(hux.run.iters.results)
-hux.run.iters.results <- huxtable::set_bottom_border(hux.run.iters.results, row = 2)
-hux.run.iters.results <- huxtable::set_align(hux.run.iters.results, col = 1, value = "left")
+hux.run.iters.results <- huxtable::set_bottom_border(hux.run.iters.results, row = 2, col = huxtable::everywhere)
+hux.run.iters.results <- huxtable::set_align(hux.run.iters.results, row = huxtable::everywhere, col = 1, value = "left")
 hux.run.iters.results <- huxtable::set_number_format(hux.run.iters.results, row = 3:9, col = 2:5, value = 4)
 
 YlGn.colors <- rev(RColorBrewer::brewer.pal(7, "YlGn"))
@@ -383,7 +383,7 @@ width(hux.run.iters.results) <- 1
 
 hux.run.iters.results <- huxtable::set_col_width(hux.run.iters.results, col = 2:6, value = (1/ncol(hux.run.iters.results)) * 0.8)
 
-cat(huxtable::to_latex(hux.run.iters.results), file = "tables/dry-run/performance.tex")
+cat(huxtable::to_latex(hux.run.iters.results, tabular_only = TRUE), file = "tables/dry-run/performance.tex")
 
 
 
@@ -449,7 +449,7 @@ hux.minimizer.params <- huxtable::add_footnote(hux.minimizer.params,
   text = "Mixture distributions are omitted from this table.")
 
 
-cat(huxtable::to_latex(hux.minimizer.params), file = "tables/dry-run/minimizer-params.tex")
+cat(huxtable::to_latex(hux.minimizer.params, tabular_only = TRUE), file = "tables/dry-run/minimizer-params.tex")
 
 
 
