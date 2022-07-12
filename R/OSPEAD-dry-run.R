@@ -495,14 +495,14 @@ for (i in 1:nrow(run.iters.obj.fn)) {
   }
   
   png(paste0("images/dry-run/estimate-div-target/estimate-div-target-", loss.fn.temp, "-flavor-", flavor.temp, ".png"), 
-    width = 1000 * 1.5, height = 800 * 1.5)
+    width = 1000 * 1.5, height = 1200 * 1.5)
   
-  par(mar = c(8, 6, 10, 2) + 0.1, cex = 1.5)
+  par(mar = c(10, 6, 10, 2) + 0.1, cex = 1.5)
   
   matplot(matrix(mat.data, nrow = length(support.interval)), 
     main = run.iters.obj.fn$title[i][[1]], 
     ylab = bquote(frac(f[D](x), f[S](x))),
-    xlab = "Age of spend outputs in terms of number of blocks. Log scale.",
+    xlab = "Age of spent outputs in terms of number of blocks. Log scale.                                                            ",
     log = "x", xaxt = "n", 
     type = "l", lty = 1, 
     ylim = c(min(c(0, mat.data)), min(c(2, max(mat.data)))), 
@@ -515,7 +515,7 @@ for (i in 1:nrow(run.iters.obj.fn)) {
     lty = rep(1, length(unique(names(run.iters$f_D)))), 
     lwd = rep(10, length(unique(names(run.iters$f_D)))), 
     col = (RColorBrewer::brewer.pal( length(unique(names(run.iters$f_D))) + 1, "Set1")[-6]),
-    inset = c(0, -0.12), xpd = NA, y.intersp = 1,
+    inset = c(0, -0.07), xpd = NA, y.intersp = 1,
     bty = "n", ncol = 3)
   
   for ( j in support.interval) {
@@ -559,14 +559,14 @@ for (i in 1:nrow(run.iters.obj.fn)) {
   }
   
   png(paste0("images/dry-run/estimate/estimate-", loss.fn.temp, "-flavor-", flavor.temp, ".png"), 
-    width = 1000 * 1.5, height = 800 * 1.5)
+    width = 1000 * 1.5, height = 1200 * 1.5)
   
-  par(mar = c(8, 6, 10, 2) + 0.1, cex = 1.5)
+  par(mar = c(10, 6, 10, 2) + 0.1, cex = 1.5)
   
   matplot(matrix(mat.data, nrow = length(support.interval)), 
     main = run.iters.obj.fn$title[i][[1]], 
     ylab = bquote(f[D](x)),
-    xlab = "Age of spend outputs in terms of number of blocks. Log scale.",
+    xlab = "Age of spent outputs in terms of number of blocks. Log scale.                                                            ",
     log = "x", xaxt = "n",
     type = "l", lty = 1, 
     ylim = c(min(c(0, mat.data)), min(c(2, max(mat.data)))), 
@@ -579,7 +579,7 @@ for (i in 1:nrow(run.iters.obj.fn)) {
     lty = rep(1, length(unique(names(run.iters$f_D)))), 
     lwd = rep(10, length(unique(names(run.iters$f_D)))), 
     col = (RColorBrewer::brewer.pal( length(unique(names(run.iters$f_D))) + 1, "Set1")[-6]),
-    inset = c(0, -0.12), xpd = NA, y.intersp = 1,
+    inset = c(0, -0.07), xpd = NA, y.intersp = 1,
     bty = "n", ncol = 3)
   
   for ( j in support.interval) {
