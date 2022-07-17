@@ -15,7 +15,7 @@ data.dir <- ""
 # Input data directory here, with trailing "/"
 
 current.block.height <- NA_integer_
-# current.block.height <- rbch::getblockchaininfo(bch.config)@result$blocks
+# current.block.height <- rbch::getblockchaininfo(blockchain.config)@result$blocks
 
 n.threads <- min(c(6, parallelly::availableCores()))
 # Recommended no more than 6 threads since all threads query the single blockchain daemon process.
@@ -34,7 +34,7 @@ cut.seq <- c(-1, cut.seq, current.block.height)
 
 heights.to.process <- 0:current.block.height
 heights.to.process <- split(heights.to.process, 
-  cut(heights.to.process, cut.seq))
+  cut(heights.to.process, unique(cut.seq)))
 
 future::plan(future::multiprocess(workers = n.threads))
 
@@ -49,13 +49,13 @@ for (height.set in heights.to.process) {
     
     block.hash <- rbch::getblockhash(blockchain.config, iter.block.height)
     if( ! is.dogecoin) {
-      block.data <- rbch::getblock(bch.config, blockhash = block.hash@result, verbosity = "l2")
+      block.data <- rbch::getblock(blockchain.config, blockhash = block.hash@result, verbosity = "l2")
       # Argument verbose = 2 gives full transaction data
+      raw.txs.ls <- block.data@result$tx
     } else {
       block.data <- jsonlite::fromJSON(paste0("http://localhost:22555/rest/block/", block.hash@result, ".json"), simplifyVector = FALSE)
+      raw.txs.ls <- block.data$tx
     }
-    #raw.txs.ls <- block.data@result$tx
-    raw.txs.ls <- block.data$tx
     
     coinbase.tx <- raw.txs.ls[[1]]
     
