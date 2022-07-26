@@ -89,7 +89,17 @@ for (height.set in heights.to.process) {
       value <- vector("numeric", length(latest.tx$vout) )
       
       for (j in seq_along(latest.tx$vout)) { 
-        extracted.address <- latest.tx$vout[[j]]$scriptPubKey$addresses
+        extracted.address <- latest.tx$vout[[j]]$scriptPubKey$address
+        # WARNING: This uses R's partial list name matching.
+        # In version bitcoin-23.0 of the BTC node daemon, this list element is
+        # named "address". Prior to bitcoin-23.0, it was "addresses":
+        # https://github.com/bitcoin/bitcoin/blob/master/doc/release-notes/release-notes-23.0.md#updated-rpcs
+        # The name is "addresses" for these versions of the node daemons for BCH, LTC, and DOGE:
+        # bch-unlimited-1.10.0.0
+        # litecoin-0.21.2.1
+        # dogecoin-1.14.5
+        # By using "address", the correct object will be found for all four coins.
+        
         if (length(extracted.address) > 1) {
           extracted.address <- list(paste0(sort(unlist(extracted.address)), collapse = "|"))
           # sort() so that the address order is always the same
