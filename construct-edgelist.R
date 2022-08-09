@@ -9,16 +9,19 @@ library(DBI)
 data.dir <- ""
 # Input data directory here, with trailing "/"
 
-source("https://gist.githubusercontent.com/jeffwong/5925000/raw/bf02ed0dd2963169a91664be02fb18e45c4d1e20/sqlitewritetable.R")
-# From https://gist.github.com/jeffwong/5925000
-# Modifies RSQLite's sqliteWriteTable function so as to reject duplicates
-
 con <- DBI::dbConnect(RSQLite::SQLite(), paste0(data.dir, "tx-graph-node-indices.db"))
+
+DBI::dbExecute(con, "PRAGMA max_page_count = 4294967292;")
+# Allows SQL database files up to 4 TB. See:
+# https://stackoverflow.com/questions/16685016/sqlite3-operationalerror-database-or-disk-is-full-on-lustre
+
+# DBI::dbExecute(con, "PRAGMA temp_store = 2;")
+# Put temp file in RAM:
+# https://stackoverflow.com/a/19259699
 
 DBI::dbExecute(con, "CREATE TABLE nodes (
 node TEXT,
-node_index INTEGER PRIMARY KEY AUTOINCREMENT,
-unique(node)
+node_index INTEGER PRIMARY KEY
 )")
 
 
@@ -60,15 +63,31 @@ for (file.iter in tx.graph.files) {
   
   new.nodes <- unique(c(tx.graph.chunk$origin, tx.graph.chunk$destination))
   
-  nodes.to.insert <- data.frame(node = new.nodes, node_index = NA, stringsAsFactors = FALSE)
+  nodes.to.insert <- data.frame(node = new.nodes, stringsAsFactors = FALSE)
   
-  mysqliteWriteTable(con, "nodes", 
-    nodes.to.insert, append = TRUE, row.names = FALSE, ignore = TRUE)
+  DBI::dbWriteTable(con, "nodes", 
+    nodes.to.insert, append = TRUE)
+  
   
   cat(nrow(nodes.to.insert), "Nodes written\n")
   
+
+  
 }
 
+base::date()
+DBI::dbExecute(con, "DELETE FROM nodes
+  WHERE rowid NOT IN (
+    SELECT MIN(rowid) 
+    FROM nodes 
+    GROUP BY node
+  )")
+base::date()
+# 1 hour
+
+# Suggested by https://stackoverflow.com/questions/25884095/how-can-i-delete-duplicates-in-sqlite
+# Must do this at the end to make sure did not leave any out
+# from the tail end of the last 1000 iters
 
 DBI::dbWriteTable(con, "edgelist_intermediate_1", 
   data.frame(origin = character(0), destination = character(0),
