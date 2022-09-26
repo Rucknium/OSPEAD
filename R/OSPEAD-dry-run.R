@@ -6,6 +6,7 @@
 # install.packages("RColorBrewer")
 # install.packages("VGAM")
 # install.packages("huxtable")
+# instal.package("ghyp")
 library(huxtable)
 
 xmr.Moser <- as.data.frame(readr::read_csv("data-raw/log_spend_times.csv.xz"))
@@ -54,6 +55,17 @@ f_D.gev <- function(param, support, return.log = FALSE) {
 }
 
 param.trans$gev <- c(I, exp, I)
+
+
+
+
+f_D.ghyp <- function(param, support, return.log = FALSE) {
+  ghyp::dghyp(support, object = ghyp::ghyp(lambda = param[1], chi = exp(param[2]), psi = exp(param[3]),
+    mu = param[4], sigma = param[5], gamma = param[6]), logvalue = return.log)
+}
+
+param.trans$ghyp <- c(I, exp, exp, I, I, I)
+
 
 
 atan.0.1 <- function(x) { atan(x)/pi + 0.5 }
@@ -119,6 +131,7 @@ distn.name.converter <- c(
   "f_D.f" = "F",
   "f_D.rpln" = "Right-Pareto Log-normal",
   "f_D.gev" = "Generalized Extreme Value",
+  "f_D.ghyp" = "Generalized Hyperbolic",
   "f_D.lgamma.f.mix" = "Log-gamma + F Mixture",
   "f_D.gev.f.mix" = "Generalized Extreme Value + F Mixture",
   "f_D.lgamma.periodic.laplace" = "Log-gamma + Periodic Laplace"
@@ -161,10 +174,12 @@ L_MLE <- function(param, f_D, spend_times_blocks = spend_times_blocks, ...) {
 
 
 run.iters.simple <- expand.grid(
-  f_D = c(f_D.lgamma = f_D.lgamma, f_D.f = f_D.f, f_D.rpln = f_D.rpln, f_D.gev = f_D.gev), 
+  f_D = c(f_D.lgamma = f_D.lgamma, f_D.f = f_D.f, f_D.rpln = f_D.rpln, f_D.gev = f_D.gev, f_D.ghyp = f_D.ghyp), 
   flavor = 1:2,
   L = c(L_FGT = L_FGT, L_Welfare = L_Welfare, L_MLE = L_MLE)
 )
+
+
 
 run.iters.simple$flavor[names(run.iters.simple$L) == "L_Welfare"] <- 
   rep(c(0.5, 1), each = sum(names(run.iters.simple$L) == "L_Welfare")/2)
@@ -179,7 +194,10 @@ start.params <- list(
   f_D.lgamma = c(2, 0), 
   f_D.f = c(-1, 0, 2), 
   f_D.rpln = c(0.5, 2, 1),
-  f_D.gev = c(100, log(100), 1))
+  f_D.gev = c(100, log(100), 1),
+  f_D.tweedie = c(1.9, 1000, -30),
+  f_D.ghyp = c(0.5, log(1), log(0.01), 0, 1, 20))
+
 
 
 future::plan(future::multiprocess())
@@ -233,14 +251,14 @@ results.mix <- future.apply::future_lapply(1:nrow(run.iters.mix), function(iter)
   
   start.params.optim <- c(0,
     results.simple[[which(
-      names(run.iters$f_D) == paste0("f_D.", mixture.name[1]) &
-      names(run.iters$L) == names(run.iters.mix$L[iter]) & 
-      run.iters$flavor == run.iters.mix$flavor[iter]
+      names(run.iters.simple$f_D) == paste0("f_D.", mixture.name[1]) &
+      names(run.iters.simple$L) == names(run.iters.mix$L[iter]) & 
+      run.iters.simple$flavor == run.iters.mix$flavor[iter]
         )]]$par,
     results.simple[[which(
-      names(run.iters$f_D) == paste0("f_D.", mixture.name[2]) &
-        names(run.iters$L) == names(run.iters.mix$L[iter]) & 
-        run.iters$flavor == run.iters.mix$flavor[iter]
+      names(run.iters.simple$f_D) == paste0("f_D.", mixture.name[2]) &
+        names(run.iters.simple$L) == names(run.iters.mix$L[iter]) & 
+        run.iters.simple$flavor == run.iters.mix$flavor[iter]
     )]]$par
   )
   
@@ -286,9 +304,9 @@ results.periodic <- future.apply::future_lapply(1:nrow(run.iters.periodic), func
   flavor <- run.iters.periodic$flavor[[iter]]
   start.params.optim <- c(
     results.simple[[which(
-      names(run.iters$f_D) == "f_D.lgamma" &
-        names(run.iters$L) == names(run.iters.periodic$L[iter]) & 
-        run.iters$flavor == run.iters.periodic$flavor[iter]
+      names(run.iters.simple$f_D) == "f_D.lgamma" &
+        names(run.iters.simple$L) == names(run.iters.periodic$L[iter]) & 
+        run.iters.simple$flavor == run.iters.periodic$flavor[iter]
     )]]$par,
     -25, # atan.0.1-transformed mixing factor
     log(24 * 30 / 2) # Scale parameter of the Laplace distribution
@@ -353,7 +371,7 @@ hux.run.iters.results <- run.iters.results
 
 hux.run.iters.results$flavor[hux.run.iters.results$flavor == 0] <- NA
 
-colnames(hux.run.iters.results) <- c("Loss function", "Loss function parameter", "Log-gamma", "F", "Right-Pareto Log-normal", "Generalized Extreme Value", "Log-gamma + F mix", "Log-gamma + GEV mix", "Log-gamma + Laplace Periodic")
+colnames(hux.run.iters.results) <- c("Loss function", "Loss function parameter", "Log-gamma", "F", "Right-Pareto Log-normal", "Generalized Extreme Value", "Generalized Hyperbolic",  "Log-gamma + F mix", "Log-gamma + GEV mix", "Log-gamma + Laplace Periodic")
 
 hux.run.iters.results <- huxtable::as_hux(hux.run.iters.results)
 hux.run.iters.results <- t(hux.run.iters.results)
@@ -361,15 +379,15 @@ hux.run.iters.results <- huxtable::set_bottom_border(hux.run.iters.results, row 
 hux.run.iters.results <- huxtable::set_align(hux.run.iters.results, row = huxtable::everywhere, col = 1, value = "left")
 hux.run.iters.results <- huxtable::set_number_format(hux.run.iters.results, row = 3:9, col = 2:5, value = 4)
 
-YlGn.colors <- rev(RColorBrewer::brewer.pal(7, "YlGn"))
+YlGn.colors <- rev(RColorBrewer::brewer.pal(8, "YlGn"))
 
 for (iter in 1:5) {
   if (iter == 5) {
     hux.run.iters.results <- huxtable::set_background_color(hux.run.iters.results, 
-      col = 1 + iter, row = order(unlist(run.iters.results[iter, 3:6])) + 2, value = YlGn.colors[1:4])
+      col = 1 + iter, row = order(unlist(run.iters.results[iter, 3:7])) + 2, value = YlGn.colors[1:5])
   } else {
     hux.run.iters.results <- huxtable::set_background_color(hux.run.iters.results, 
-      col = 1 + iter, row = order(unlist(run.iters.results[iter, 3:9])) + 2, value = YlGn.colors)
+      col = 1 + iter, row = order(unlist(run.iters.results[iter, 3:10])) + 2, value = YlGn.colors)
   }
 }
 
@@ -381,7 +399,7 @@ hux.run.iters.results <- huxtable::set_wrap(hux.run.iters.results, col = 1, row 
 width(hux.run.iters.results) <- 1
 # Makes the cells wrap
 
-hux.run.iters.results <- huxtable::set_col_width(hux.run.iters.results, col = 2:6, value = (1/ncol(hux.run.iters.results)) * 0.8)
+hux.run.iters.results <- huxtable::set_col_width(hux.run.iters.results, col = 2:6, value = (1/ncol(hux.run.iters.results)) * 0.7)
 
 cat(huxtable::to_latex(hux.run.iters.results, tabular_only = TRUE), file = "tables/dry-run/performance.tex")
 
@@ -393,23 +411,27 @@ minimizer.params <- data.frame(f_D = names(run.iters[[1]]), L = names(run.iters[
 dists.to.exclude <- c(
   "f_D.lgamma.f.mix",
   "f_D.gev.f.mix",
-  "f_D.lgamma.periodic.laplace"
+  "f_D.lgamma.periodic.laplace",
+  "f_D.ghyp" # Too many params
   #"f_D.lgamma.cosine"
 )
 
 minimizer.params <- minimizer.params[ ! minimizer.params$f_D %in% dists.to.exclude, ]
 
 minimizer.params$f_D <- gsub("f_D[.]", "", minimizer.params$f_D)
+#rownames(minimizer.params) <- NULL
 
-for ( i in 1:nrow(minimizer.params)) {
+for ( i in rownames(minimizer.params)) {
+  # rownames(minimizer.params) will properly skip the excluded distributions,
+  # combined with as.numeric(i) below
   
-  temp.param.value <- results[[i]]$par
+  temp.param.value <- results[[as.numeric(i)]]$par
   
   for ( j in 1:length(temp.param.value)) {
     temp.param.value[j] <- param.trans[[minimizer.params[i, "f_D"]]][[j]](temp.param.value[j])
   }
   
-  minimizer.params[i, paste0("param_", seq_along(results[[i]]$par))] <- temp.param.value
+  minimizer.params[i, paste0("param_", seq_along(results[[as.numeric(i)]]$par))] <- temp.param.value
     
 }
 
@@ -433,6 +455,8 @@ hux.minimizer.params <- huxtable::set_wrap(hux.minimizer.params, col = 1, row = 
 
 width(hux.minimizer.params) <- 0.95
 
+bottom_border(hux.minimizer.params) <- 1
+
 hux.minimizer.params <- huxtable::add_footnote(hux.minimizer.params, 
   text = "F Distribution: param_1 is first degree of freedom parameter; param_2 is second degree of freedom parameter; param_3 is non-centrality parameter.")
 
@@ -446,8 +470,10 @@ hux.minimizer.params <- huxtable::add_footnote(hux.minimizer.params,
   text = "Right-Pareto Log-normal Distribution: param_1 is shape parameter; param_2 is mean parameter; param_3 is variance parameter.")
 
 hux.minimizer.params <- huxtable::add_footnote(hux.minimizer.params, 
-  text = "Mixture distributions are omitted from this table.")
+  text = "Mixture distributions and Generalized Hyperbolic Distribution are omitted from this table.")
 
+
+hux.minimizer.params <- huxtable::set_col_width(hux.minimizer.params, col = 2:6, value = (1/ncol(hux.run.iters.results)) * 0.7)
 
 cat(huxtable::to_latex(hux.minimizer.params, tabular_only = TRUE), file = "tables/dry-run/minimizer-params.tex")
 
@@ -490,7 +516,8 @@ for (i in 1:nrow(run.iters.obj.fn)) {
     mat.data <- c(mat.data, a_i[support.interval]/sum(a_i) / theta_i[support.interval] )
     
     legend.labels <- c(legend.labels, 
-      paste0(distn.name.converter[ names(run.iters$f_D)[j] ], " | L = ", prettyNum(results[[j]]$value))
+      paste0(distn.name.converter[ names(run.iters$f_D)[j] ], " | L = ",
+        prettyNum(results[[j]]$value, digits = 5, format = "fg"))
     )
   }
   
@@ -516,7 +543,8 @@ for (i in 1:nrow(run.iters.obj.fn)) {
     lwd = rep(10, length(unique(names(run.iters$f_D)))), 
     col = (RColorBrewer::brewer.pal( length(unique(names(run.iters$f_D))) + 1, "Set1")[-6]),
     inset = c(0, -0.07), xpd = NA, y.intersp = 1,
-    bty = "n", ncol = 3)
+    bty = "n", ncol = 3,
+    text.width = 1.1)
   
   for ( j in support.interval) {
     rug(support.interval[j], ticksize = theta_i[j] * 50, col = "blue")
@@ -554,7 +582,8 @@ for (i in 1:nrow(run.iters.obj.fn)) {
     mat.data <- c(mat.data, a_i[support.interval]/sum(a_i) )
     
     legend.labels <- c(legend.labels, 
-      paste0(distn.name.converter[ names(run.iters$f_D)[j] ], " | L = ", prettyNum(results[[j]]$value))
+      paste0(distn.name.converter[ names(run.iters$f_D)[j] ], " | L = ",
+        prettyNum(results[[j]]$value, digits = 5, format = "fg"))
     )
   }
   
@@ -580,7 +609,8 @@ for (i in 1:nrow(run.iters.obj.fn)) {
     lwd = rep(10, length(unique(names(run.iters$f_D)))), 
     col = (RColorBrewer::brewer.pal( length(unique(names(run.iters$f_D))) + 1, "Set1")[-6]),
     inset = c(0, -0.07), xpd = NA, y.intersp = 1,
-    bty = "n", ncol = 3)
+    bty = "n", ncol = 3,
+    text.width = 1.1)
   
   for ( j in support.interval) {
     rug(support.interval[j], ticksize = theta_i[j] * 50, col = "blue")
