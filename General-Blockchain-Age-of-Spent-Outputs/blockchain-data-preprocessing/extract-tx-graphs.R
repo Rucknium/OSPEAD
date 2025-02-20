@@ -36,7 +36,7 @@ heights.to.process <- 0:current.block.height
 heights.to.process <- split(heights.to.process, 
   cut(heights.to.process, unique(cut.seq)))
 
-future::plan(future::multiprocess(workers = n.threads))
+future::plan(future::multisession(workers = n.threads))
 
 
 for (height.set in heights.to.process) {
