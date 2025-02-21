@@ -1,6 +1,8 @@
- ## Optimal Static Parametric Estimation of Arbitrary Distributions (OSPEAD) for the Monero decoy selection algorithm
+## Optimal Static Parametric Estimation of Arbitrary Distributions (OSPEAD) for the Monero decoy selection algorithm
 
 This repo contains all submitted documents and code for OSPEAD, most of which has been private until now. OSPEAD is a proposed improvement to Monero's decoy selection algorithm that would reduce the probability that an anti-privacy adversary could correctly guess the real spend in a ring signature.
+
+![Statistical Monero Logo](Statistical-Monero-Logo.gif)
 
 ### Results summary
 
