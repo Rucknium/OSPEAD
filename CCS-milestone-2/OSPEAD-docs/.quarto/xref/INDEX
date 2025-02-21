@@ -1,0 +1,47 @@
+{
+  "index.qmd": {
+    "index.html": "bbc5fe18"
+  },
+  "requirements.qmd": {
+    "requirements.html": "975bd6b1"
+  },
+  "successful-simulation.qmd": {
+    "successful-simulation.html": "49d79f8a"
+  },
+  "ring-gathering.qmd": {
+    "ring-gathering.html": "cea36d3b"
+  },
+  "nonstandard-transactions.qmd": {
+    "nonstandard-transactions.html": "74762aa8"
+  },
+  "broadcast-time.qmd": {
+    "broadcast-time.html": "6091683d"
+  },
+  "miscellaneous-preparation.qmd": {
+    "miscellaneous-preparation.html": "15f95f01"
+  },
+  "transformed-age.qmd": {
+    "transformed-age.html": "51c20a6f"
+  },
+  "bjr-and-patra-sen.qmd": {
+    "bjr-and-patra-sen.html": "0af47371"
+  },
+  "nonparametric-real-spend.qmd": {
+    "nonparametric-real-spend.html": "c9acdced"
+  },
+  "real-spend-visualization.qmd": {
+    "real-spend-visualization.html": "629527db"
+  },
+  "parametric-fit.qmd": {
+    "parametric-fit.html": "e7412b71"
+  },
+  "performance-evaluation.qmd": {
+    "performance-evaluation.html": "47d861b8"
+  },
+  "appendix-bjr-benchmarks.qmd": {
+    "appendix-bjr-benchmarks.html": "7de3c12c"
+  },
+  "references.qmd": {
+    "references.html": "2dfe4a06"
+  }
+}

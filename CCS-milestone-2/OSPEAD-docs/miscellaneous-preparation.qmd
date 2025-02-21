@@ -1,0 +1,150 @@
+# Miscellaneous Preparation
+
+This script does three things:
+
+1) Assigns each ring a boolean TRUE/FALSE value for `is.nonstandard.rucknium` and `is.nonstandard.isthmus` based on whether its transaction hash was identified as a nonstandard transaction in @sec-nonstandard-transactions .
+
+2) Rarely, ring members can have an age that is younger than the block the transaction was confirmed in. The time recorded by the txpool archive database and the blockchain may disagree because of loose block timestamp rules. In this case, the age of every ring member is shifted so that all ring members have a valid non-negative age.
+
+3) An `output.index.only.locked` object is created. This is a record of the unlock time of outputs with nonzero unlock time, including coinbase outputs. This is a necessary piece of data to compute the decoy selection probability distribution at every block height, whose support only includes outputs that have a nonzero probability of being selected as decoys, i.e. outputs that are actually spendable at the time of transaction construction.
+
+Again, input this code in the same R session as used in previous chapters.
+
+## Code
+
+```{r}
+#| column: page
+
+xmr.rings[, is.nonstandard.rucknium :=
+  (tx_hash %chin% tx.hash.nonstandard.fees) |
+  (tx_hash %chin% tx.hash.nonstandard.unlock.time) |
+  is_mordinal_ring | is_mordinal_transfer_ring]
+
+xmr.rings[, is.nonstandard.isthmus := tx_hash %chin% isthmus.anomalous.hashes]
+
+rm(tx.hash.nonstandard.fees, tx.hash.nonstandard.unlock.time, isthmus.anomalous.hashes)
+
+
+youngest.RingCT <- output.index[ output_amount == 0 | tx_num == 1,
+  .(youngest.output.index = max(output_index)), by = "block_height"]
+
+# rm(output.index)
+# TODO: uncomment this
+
+youngest.RingCT <- merge(youngest.RingCT,
+  data.table(block_height = min(youngest.RingCT$block_height):max(youngest.RingCT$block_height)),
+  all = TRUE)
+
+youngest.RingCT[, youngest.output.index :=
+  zoo::na.locf(youngest.output.index, na.rm = FALSE)]
+# Before RingCT outputs were mandatory, some blocks had zero RingCT-eligible outputs.
+# These lines make sure that these blocks are included in the dataset
+
+youngest.RingCT[, block_height := block_height + 9L]
+# Used to be 10L before block_height_ring changed to block_height_ring.at.construction below
+
+xmr.rings <- merge(xmr.rings, youngest.RingCT, all.x = TRUE, by.x = "block_height_ring.at.construction", by.y = "block_height")
+# Need all.x = TRUE because will have NAs for the first 10 blocks of youngest.output.index
+
+
+
+xmr.rings[, ring_member_age := youngest.output.index - output_index]
+# xmr.rings[, table(ring_member_age < 0) ]
+# > 1798220 /357314244
+# [1] 0.005032601
+
+xmr.rings[, ring_member_age := ring_member_age + 1]
+# Add 1 so youngest ring member is 1, not zero
+
+
+fetus.rings <- xmr.rings[ring_member_age <= 0, ]
+
+fetus.rings <- merge(unique(fetus.rings[, .(tx_hash, input_num)]), xmr.rings, by = c("tx_hash", "input_num"))
+setcolorder(fetus.rings, colnames(xmr.rings))
+nrow(xmr.rings)
+xmr.rings <- fsetdiff(xmr.rings, fetus.rings)
+nrow(xmr.rings)
+# This is anti-join
+
+n.fetus.rings <- n.fetus.rings.initial <- nrow(fetus.rings)
+
+born.rings <- fetus.rings[FALSE, ]
+
+youngest.RingCT.rolling <- copy(youngest.RingCT)
+
+fetus.rings[, ring_member_age := NULL]
+fetus.rings[, youngest.output.index := NULL]
+
+i <- 0
+while (n.fetus.rings > 0) {
+  i <- i + 1
+  youngest.RingCT.rolling[, block_height := block_height - 1L]
+  birthing.rings <- merge(fetus.rings, youngest.RingCT.rolling, all.x = TRUE, by.x = "block_height_ring.at.construction", by.y = "block_height")
+  birthing.rings[, ring_member_age := youngest.output.index - output_index]
+  birthing.rings[, any.fetus := any(ring_member_age <= 0), by = c("tx_hash", "input_num")]
+
+  if (all(birthing.rings$any.fetus)) { next }
+
+  fetus.rings <- birthing.rings[(any.fetus), ]
+  fetus.rings[, ring_member_age := NULL]
+  fetus.rings[, youngest.output.index := NULL]
+  any.fetus.external <- birthing.rings[, any.fetus]
+  birthing.rings[, any.fetus := NULL]
+
+  born.rings <- rbind(born.rings, birthing.rings[(! any.fetus.external), ])
+
+  n.fetus.rings <- nrow(fetus.rings)
+
+  if (i >= 1000) { break }
+  # Don't go further than 1000 blocks. The few rings
+  # that cannot be repaired after 1000 blocks will be excluded from the analysis
+
+}
+# The vast majority are off-by-one-block
+
+stopifnot(nrow(born.rings) + n.fetus.rings == n.fetus.rings.initial)
+
+xmr.rings <- rbind(xmr.rings, born.rings)
+
+
+
+output.index.only.locked <- output.index[
+  output_unlock_time != 0 &
+  (output_amount == 0 | tx_num == 1),
+  .(output_index, output_unlock_time)]
+
+
+output.index.only.locked.timestamp <- output.index.only.locked[output_unlock_time > 500000000, ]
+# Only about 40 of these have timestamp interpretations instead of block height interpretations
+# https://thecharlatan.ch/Monero-Unlock-Time-Vulns/
+
+block.timestamps <- unique(output.index[, .(block_height, block_timestamp)])
+
+setorder(block.timestamps, block_timestamp)
+
+output.index.only.locked.timestamp[, output_unlock_time := {
+  interval.index <- findInterval(output_unlock_time, block.timestamps$block_timestamp)
+  ifelse(interval.index == 0, 0, 1 + block.timestamps$block_height[interval.index])
+  # If the time is before the earliest block in the dataset, then findInterval() will return a zero index (invalid)
+  # So set it to the genesis block
+  # Technically the genesis block should be unix time zero, but the data gatherer only gets RingCT
+  # txs, which start well after the genesis block.
+  }
+]
+
+output.index.only.locked.timestamp[output_unlock_time == current.height + 1, output_unlock_time := .Machine$integer.max]
+
+output.index.only.locked <- rbind(
+  output.index.only.locked[output_unlock_time <= 500000000, ], output.index.only.locked.timestamp)
+
+output.index.only.locked[, output_unlock_time := as.integer(output_unlock_time)]
+output.index.only.locked[, output_index := as.integer(output_index)]
+
+setDF(output.index.only.locked)
+
+# rm(youngest.RingCT)
+
+
+
+
+```

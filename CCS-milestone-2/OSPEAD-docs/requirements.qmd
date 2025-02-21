@@ -1,0 +1,70 @@
+# Requirements
+
+## Install R
+
+If on Windows or macOS, go [here](https://cloud.r-project.org/) to install R.
+
+If on Ubuntu or another Debian-based Linux installation, install `r-base` and `r-base-dev` so that you can compile R packages:
+
+```bash
+sudo apt-get install r-base r-base-dev
+```
+
+## Linux system packages
+
+Several R packages will need to be installed. If you are using Linux, the R packages will likely be installed from source. Therefore, you need to install a few Linux system packages that are required:
+
+-   GSL (GNU Scientific Library). Instructions for installing GSL are [here](https://www.gnu.org/software/gsl). On most Linux distributions, it should be installable with `sudo apt-get install libgsl-dev`.
+
+-   [GraphicsMagick](http://www.graphicsmagick.org/). On most Linux distributions, it should be installable with `sudo apt-get install graphicsmagick`.
+
+-   Many system packages are needed for the `devtools` R package. These can be installed with `sudo apt-get install gfortran build-essential libcurl4-openssl-dev libxml2-dev libfontconfig1-dev libharfbuzz-dev libfribidi-dev libfreetype6-dev libpng-dev libtiff5-dev libjpeg-dev`.
+
+## R packages from CRAN
+
+The required R packages hosted on CRAN (Comprehensive R Archive Network) can be installed by initiating an R session and inputting
+
+```{r}
+install.packages(c("devtools", "data.table", "RCurl", "RJSONIO", "future",
+  "future.apply", "parallelly", "lubridate", "collapse", "actuar",
+  "gbutils", "binsmooth", "spatstat.univar", "distributionsrd",
+  "VGAM", "VaRES", "ghyp", "extraDistr", "GB2", "wrswoR", "Rfast",
+  "fitdistrplus", "bsgof", "PearsonDS", "animation", "triangle",
+  "viridis", "RColorBrewer", "ISOweek", "ggh4x"), Ncpus = 4)
+```
+
+::: {.callout-important}
+R may ask you if you want to create a personal library directory to install packages into. Select "yes".
+:::
+
+## R packages from GitHub
+
+One package must be installed from GitHub:
+
+```{r}
+remotes::install_github("dracula/dRacula", upgrade = FALSE)
+```
+
+## OSPEAD R package
+
+In an R session launched from a directory that contains `decoyanalysis_0.1.0.tar.gz`, input:
+
+```{r}
+install.packages("decoyanalysis_0.1.0.tar.gz", repos = NULL)
+```
+
+## Fast BLAS
+
+Enabling a fast BLAS (Basic Linear Algebra Subprograms) is strongly recommended. Instructions for Ubuntu and Windows are [here](https://brettklamer.com/diversions/statistical/faster-blas-in-r/). On Ubuntu, `sudo apt-get install libopenblas-base` should install and enable the fast BLAS.
+
+With Linux, to check that the fast BLAS has been enabled, open a new R session and input `sessionInfo()`. One of the messages should be
+
+``` txt
+Matrix products: default
+BLAS:   /usr/lib/x86_64-linux-gnu/openblas-pthread/libblas.so.3
+LAPACK: /usr/lib/x86_64-linux-gnu/openblas-pthread/liblapack.so.3
+```
+
+## Multi-machine
+
+It is possible to run the most computationally-demanding parts of the code on multiple machines in parallel. These OSPEAD-docs instructions assume a single machine. Multi-machine instructions may be added later.

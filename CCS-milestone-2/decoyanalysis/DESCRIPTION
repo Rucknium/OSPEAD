@@ -1,0 +1,38 @@
+Package: decoyanalysis
+Type: Package
+Title: Separate real and decoy distributions
+Version: 0.1.1
+Date: 2025-02-20
+Authors@R: 
+    c(person(family = "Rucknium",
+             role = c("cre", "aut", "cph"),
+             email = "Rucknium@protonmail.com",
+             comment = c(ORCID = "0000-0001-5999-8950")),
+      person(given = "Koen",
+             family = "Jochmans",
+             role = "cph",
+             comment = "Original author of bjr() MATLAB implementation")
+      )
+Description: Implements the Bonhomme-Jochmans-Robin (2014) and
+    Patra-Sen (2016) estimators.
+License: GPL (>= 2)
+Encoding: UTF-8
+Imports:
+  Rcpp (>= 1.0.8),
+  pracma,
+  Matrix,
+  JADE,
+  gtools,
+  expm,
+  future,
+  future.apply,
+  parallelly,
+  Iso
+LinkingTo: Rcpp
+RoxygenNote: 7.3.2
+Suggests: 
+    testthat (>= 3.0.0),
+    withr
+Config/testthat/edition: 3
+Depends: 
+    R (>= 2.10)

@@ -1,0 +1,35 @@
+# Nonstandard Transactions {#sec-nonstandard-transactions}
+
+Using the R session opened for the previous chapter, @sec-ring-gathering, run the code below.
+
+Transactions that were probably created with nonstandard software are identified. The "Rucknium" identification criteria is based on nonstandard fees and nonzero output unlock time. Information about nonstandard fees is [here](https://github.com/Rucknium/misc-research/tree/main/Monero-Nonstandard-Fees). Code for the "isthmus" criteria is [here](https://github.com/Mitchellpkt/monero_fingerprinting_pipeline).
+
+The transactions identified as nonstandard will be not be included in the ring member age analysis. The exclusion criteria removes low-hanging fruit. The Bonhomme-Jochmans-Robin estimator is intended to remove everything else.
+
+## Code
+
+```{r}
+#| column: page
+
+v16.fork.height <- 2689608 # 2022-08-14
+
+fees <- unique(output.index[block_height >= v16.fork.height,
+  .(tx_hash, block_height, tx_fee, tx_weight_bytes, number_of_outputs)])
+
+fees[, fee_per_byte_nanoneros := floor((tx_fee/tx_weight_bytes)/1000)]
+
+tx.hash.nonstandard.fees <- fees[ !(
+    fee_per_byte_nanoneros %between% c(18, 22) |
+    fee_per_byte_nanoneros %between% c(78, 82) |
+    fee_per_byte_nanoneros %between% c(315, 325) |
+    fee_per_byte_nanoneros %between% c(3900, 4100)
+  ), tx_hash]
+# Standard fees
+
+rm(fees)
+
+tx.hash.nonstandard.unlock.time <- unique(output.index[output_unlock_time > 0 & tx_num != 1, tx_hash])
+
+isthmus.anomalous.hashes <- fread("anomalous_hashes.txt", stringsAsFactors = FALSE)$tx_hash
+
+```

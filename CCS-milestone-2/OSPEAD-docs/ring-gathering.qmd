@@ -1,0 +1,370 @@
+# Ring Gathering {#sec-ring-gathering}
+
+First, the data on ring member ages must be collected from the Monero blockchain. This is done by repeated RPC queries to a running instance of `monerod`, the Monero node software.
+
+Several parallel processes are spawned to query `monerod`. The number of processes is half of the CPU's threads, minus one.
+
+The user should specify two variables
+
+-   `current.height`, which is the most recent height that you want to collect data for. This should be the last block in the last day of an [ISO week](https://en.wikipedia.org/wiki/ISO_week_date), by UTC time. Use `https://xmrchain.net` or another block explorer to determine what block number it is.
+
+-   `url.rpc`, which is the URL of the `monerod` RPC. By default, it should be `http://127.0.0.1:18081`.
+
+Open an R session and run the following code. Do not close the R session after running it. On a powerful machine, it will take about 24 hours to finish.
+
+## Code
+
+```{r}
+#| column: page
+
+library(data.table)
+
+current.height <- NA # 3263496
+# current.height should be the most recent height that you want to collect data for
+
+stopifnot(!is.na(current.height))
+
+block.heights <- 1220516:current.height
+# 1220516 is hard fork height that allowed the first RingCT transactions
+# https://github.com/monero-project/monero#scheduled-softwarenetwork-upgrades
+
+url.rpc <- "http://127.0.0.1:18081"
+# Set the IP address and port of your node. Should usually be "http://127.0.0.1:18081"
+# Data can be pulled from multiple monerod instances. In that case, the blockchains
+# of the multiple monerod instances should be on different storage devices because
+# storage I/O seems to be the bottleneck. Specify multiple instances as:
+# url.rpc <- c("http://127.0.0.1:18081", "http://127.0.0.1:58081")
+
+
+
+# Modified from TownforgeR::tf_rpc_curl function
+xmr.rpc <- function(
+    url.rpc = "http://127.0.0.1:18081/json_rpc",
+  method = "",
+  params = list(),
+  userpwd = "",
+  num.as.string = FALSE,
+  nonce.as.string = FALSE,
+  keep.trying.rpc = FALSE,
+  curl = RCurl::getCurlHandle(),
+  ...
+){
+
+  json.ret <- RJSONIO::toJSON(
+    list(
+      jsonrpc = "2.0",
+      id = "0",
+      method = method,
+      params = params
+    ), digits = 50
+  )
+
+  rcp.ret <- 	tryCatch(RCurl::postForm(url.rpc,
+    .opts = list(
+      userpwd = userpwd,
+      postfields = json.ret,
+      httpheader = c('Content-Type' = 'application/json', Accept = 'application/json')
+      # https://stackoverflow.com/questions/19267261/timeout-while-reading-csv-file-from-url-in-r
+    ),
+    curl = curl
+  ), error = function(e) {NULL})
+
+  if (keep.trying.rpc && length(rcp.ret) == 0) {
+    while (length(rcp.ret) == 0) {
+      rcp.ret <- 	tryCatch(RCurl::postForm(url.rpc,
+        .opts = list(
+          userpwd = userpwd,
+          postfields = json.ret,
+          httpheader = c('Content-Type' = 'application/json', Accept = 'application/json')
+          # https://stackoverflow.com/questions/19267261/timeout-while-reading-csv-file-from-url-in-r
+        ),
+        curl = curl
+      ), error = function(e) {NULL})
+    }
+  }
+
+  if (is.null(rcp.ret)) {
+    stop("Cannot connect to monerod. Is monerod running?")
+  }
+
+  if (num.as.string) {
+    rcp.ret <- gsub("(: )([-0123456789.]+)([,\n\r])", "\\1\"\\2\"\\3", rcp.ret )
+  }
+
+  if (nonce.as.string & ! num.as.string) {
+    rcp.ret <- gsub("(\"nonce\": )([-0123456789.]+)([,\n\r])", "\\1\"\\2\"\\3", rcp.ret )
+  }
+
+  RJSONIO::fromJSON(rcp.ret, asText = TRUE) # , simplify = FALSE
+}
+
+
+
+system.time({
+
+  threads <- max(2, min(floor(parallelly::availableCores()/2), 32L) - length(url.rpc))
+
+  future::plan(future::multisession(workers = threads))
+  options(future.globals.maxSize= 8000*1024^2)
+
+  set.seed(314)
+
+  # Randomize block heights to make processing time more uniform between parallel processes
+  block.heights <- split(block.heights, sample(cut(block.heights, threads)))
+  # First randomly put heights into list elements (split() will sort them ascendingly in each list element)
+  block.heights <- lapply(block.heights, sample)
+  # Then order the heights randomly within each list element
+  block.heights <- unname(block.heights)
+
+  returned <- future.apply::future_lapply(block.heights, function(block.heights) {
+
+    url.rpc <- sample(url.rpc, 1)
+
+    handle <- RCurl::getCurlHandle()
+
+    return.data <- vector("list", length(block.heights))
+
+    for (height.iter in seq_along(block.heights)) {
+
+      height <- block.heights[height.iter]
+
+      block.data <- xmr.rpc(url.rpc = paste0(url.rpc, "/json_rpc"),
+        method = "get_block",
+        params = list(height = height ),
+        keep.trying.rpc = TRUE,
+        curl = handle)$result
+
+      txs.to.collect <- c(block.data$miner_tx_hash, block.data$tx_hashes)
+
+      rcp.ret <- 	tryCatch(RCurl::postForm(paste0(url.rpc, "/get_transactions"),
+        .opts = list(
+          postfields = paste0('{"txs_hashes":["', paste0(txs.to.collect, collapse = '","'), '"],"decode_as_json":true}'),
+          httpheader = c('Content-Type' = 'application/json', Accept = 'application/json')
+        ),
+        curl = handle
+      ), error = function(e) {NULL})
+
+      if (length(rcp.ret) == 0) {
+        while (length(rcp.ret) == 0) {
+          rcp.ret <- tryCatch(RCurl::postForm(paste0(url.rpc, "/get_transactions"),
+            .opts = list(
+              postfields = paste0('{"txs_hashes":["', paste0(txs.to.collect, collapse = '","'), '"],"decode_as_json":true}'),
+              httpheader = c('Content-Type' = 'application/json', Accept = 'application/json')
+            ),
+            curl = handle
+          ), error = function(e) {NULL})
+        }
+      }
+
+      rcp.ret <- RJSONIO::fromJSON(rcp.ret, asText = TRUE)
+
+      output.index.collected <- vector("list", length(txs.to.collect))
+      rings.collected <- vector("list", length(txs.to.collect) - 1)
+
+      for (i in seq_along(txs.to.collect)) {
+
+        tx.json <- tryCatch(
+          RJSONIO::fromJSON(rcp.ret$txs[[i]]$as_json, asText = TRUE),
+          error = function(e) {NULL} )
+
+        if (is.null(tx.json)) {
+          # stop()
+          cat(paste0("tx: ", i, " block: ", height, "\n"), file = "~/RingCT-problems.txt", append = TRUE)
+          next
+        }
+
+        output.amounts <- sapply(tx.json$vout, FUN = function(x) {x$amount})
+
+        tx_size_bytes <- ifelse(i == 1,
+          nchar(rcp.ret$txs[[i]]$pruned_as_hex) / 2,
+          nchar(rcp.ret$txs[[i]]$as_hex) / 2)
+        # Coinbase has special structure
+        # Reference:
+        # https://libera.monerologs.net/monero-dev/20221231
+        # https://github.com/monero-project/monero/pull/8691
+        # https://github.com/monero-project/monero/issues/8311
+
+        calc.tx.weight.clawback <- function(p, is.bpp) {
+          pow.of.two <- 2^(1:4)
+          pow.of.two.index <- findInterval(p, pow.of.two, left.open = TRUE) + 1
+
+          n_padded_outputs <- pow.of.two[pow.of.two.index]
+
+          if (is.bpp) {
+            multiplier <- 6
+          } else {
+            multiplier <- 9
+          }
+
+          bp_base <- (32 * (multiplier + 7 * 2)) / 2
+          nlr <- ceiling(log2(64 * p))
+          bp_size <- 32 * (multiplier + 2 * nlr)
+          transaction_clawback <- (bp_base * n_padded_outputs - bp_size) * 4 / 5
+          floor(transaction_clawback) # With bpp, this is sometimes (always?) not an integer
+        }
+        # Equation from page 63 of Zero to Monero 2.0
+        # Updated with Bulletproofs+
+        # https://github.com/monero-project/monero/blame/c8214782fb2a769c57382a999eaf099691c836e7/src/cryptonote_basic/cryptonote_format_utils.cpp#L106
+
+
+        if (length(tx.json$vout) == 2 || i == 1) {
+          # i == 1 means the first tx, which is the coinbase tx
+          tx_weight_bytes <- tx_size_bytes
+        } else {
+          tx_weight_bytes <- tx_size_bytes +
+            calc.tx.weight.clawback(length(tx.json$vout), length(tx.json$rctsig_prunable$bpp) > 0)
+        }
+
+
+        tx_fee <- ifelse(i == 1 || is.null(tx.json$rct_signatures), NA, tx.json$rct_signatures$txnFee)
+        # missing non-RingCT tx fee
+
+        is.mordinal <-
+          height >= 2838965 &&
+          length(tx.json$vout) == 2 &&
+          i > 1 && # not the first tx, which is the coinbase tx
+          length(tx.json$extra) > 44 &&
+          tx.json$extra[45] == 16
+        # With "&&", evaluates each expression sequentially until it is false (if ever). Then stops.
+        # If all are TRUE, then returns true.
+
+        is.mordinal.transfer <-
+          height >= 2838965 &&
+          length(tx.json$vout) == 2 &&
+          i > 1 && # not the first tx, which is the coinbase tx
+          length(tx.json$extra) > 44 &&
+          tx.json$extra[45] == 17
+
+        output.index.collected[[i]] <- data.table(
+          block_height = height,
+          block_timestamp = block.data$block_header$timestamp,
+          tx_num = i,
+          tx_hash = txs.to.collect[i],
+          tx_version = tx.json$version,
+          tx_fee = tx_fee,
+          tx_size_bytes = tx_size_bytes,
+          tx_weight_bytes = tx_weight_bytes,
+          number_of_inputs = length(tx.json$vin),
+          number_of_outputs = length(tx.json$vout),
+          output_num = seq_along(rcp.ret$txs[[i]]$output_indices),
+          output_index = rcp.ret$txs[[i]]$output_indices,
+          output_amount = output.amounts,
+          output_unlock_time = tx.json$unlock_time,
+          is_mordinal = is.mordinal,
+          is_mordinal_transfer = is.mordinal.transfer)
+
+
+        if (i == 1L) { next }
+        # Skip first tx since it is the coinbase and has no inputs
+
+        tx_hash <- txs.to.collect[i]
+
+        rings <- vector("list", length(tx.json$vin))
+
+        for (j in seq_along(tx.json$vin)) {
+          rings[[j]] <- data.table(
+            tx_hash = tx_hash,
+            input_num = j,
+            input_amount = tx.json$vin[[j]]$key$amount,
+            key_offset_num = seq_along(tx.json$vin[[j]]$key$key_offsets),
+            key_offsets = tx.json$vin[[j]]$key$key_offsets
+          )
+        }
+
+        rings.collected[[i-1]] <- rbindlist(rings)
+
+      }
+
+      output.index.collected <- data.table::rbindlist(output.index.collected)
+      rings.collected <- rbindlist(rings.collected)
+
+      return.data[[height.iter]] <- list(
+        output.index.collected = output.index.collected,
+        rings.collected = rings.collected)
+
+    }
+
+    return.data
+
+  }, future.seed = TRUE)
+})
+
+
+future::plan(future::sequential)
+# Shuts down R threads to free RAM
+
+returned.temp <- vector("list", length(returned))
+
+for (i in seq_along(returned)) {
+  returned.temp[[i]] <- list(
+    output.index.collected = rbindlist(lapply(returned[[i]],
+      FUN = function(y) { y$output.index.collected })),
+    rings.collected = rbindlist(lapply(returned[[i]],
+      FUN = function(y) { y$rings.collected }))
+  )
+}
+
+returned.temp <- list(
+  output.index.collected = rbindlist(lapply(returned.temp,
+    FUN = function(y) { y$output.index.collected })),
+  rings.collected = rbindlist(lapply(returned.temp,
+    FUN = function(y) { y$rings.collected }))
+)
+
+output.index <- returned.temp$output.index.collected
+returned.temp$output.index.collected <- NULL
+xmr.rings <- returned.temp$rings.collected
+rm(returned.temp)
+
+setorder(xmr.rings, tx_hash, input_num, key_offset_num)
+
+xmr.rings[, output_index := cumsum(key_offsets), by = c("tx_hash", "input_num")]
+
+xmr.rings <- merge(xmr.rings, unique(output.index[, .(tx_hash, block_height,
+  block_timestamp, tx_fee, tx_size_bytes, tx_weight_bytes, is_mordinal, is_mordinal_transfer)]), by = "tx_hash")
+
+ring.col.names <- c("block_height", "block_timestamp", "tx_fee", "tx_size_bytes",
+  "tx_weight_bytes", "is_mordinal", "is_mordinal_transfer")
+
+setnames(xmr.rings, ring.col.names, paste0(ring.col.names, "_ring"))
+
+output.index[, output_amount_for_index := ifelse(tx_num == 1, 0, output_amount)]
+
+output.index <- output.index[ !(tx_num == 1 & tx_version == 1), ]
+# Remove coinbase outputs that are ineligible for use in a RingCT ring
+# See https://libera.monerologs.net/monero-dev/20230323#c224570
+
+v16.fork.height <- 2689608 # 2022-08-14
+xmr.rings <- xmr.rings[block_height_ring >= v16.fork.height, ]
+# Remove data from before August 2022 hard fork
+
+
+xmr.rings <- merge(xmr.rings, output.index[, .(block_height, block_timestamp, tx_num, output_num,
+  output_index, output_amount, output_amount_for_index, output_unlock_time,
+  is_mordinal, is_mordinal_transfer, tx_fee, tx_size_bytes)],
+  # only dont need tx_hash column from output.index
+  by.x = c("input_amount", "output_index"),
+  by.y = c("output_amount_for_index", "output_index")) #, all = TRUE)
+
+
+xmr.rings <- xmr.rings[input_amount == 0, ]
+# Remove non-RingCT rings
+
+setorder(output.index, block_height, tx_num, output_num)
+
+
+xmr.rings.isoweek <- unique(xmr.rings[, .(block_timestamp_ring = block_timestamp_ring)])
+
+xmr.rings.isoweek[, block_timestamp_ring_isoweek := paste0(lubridate::isoyear(as.POSIXct(block_timestamp_ring, origin = "1970-01-01", tz = "UTC")), "-",
+  formatC(lubridate::isoweek(as.POSIXct(block_timestamp_ring, origin = "1970-01-01", tz = "UTC")), width = 2, flag = "0"))]
+
+xmr.rings <- merge(xmr.rings, xmr.rings.isoweek, by = "block_timestamp_ring")
+# speed improvement by splitting and then merging
+
+iso.weeks <- xmr.rings[, unique(block_timestamp_ring_isoweek)]
+
+iso.weeks <- iso.weeks[as.numeric(gsub("-", "", iso.weeks, fixed = TRUE)) >= 202233]
+# week after hard fork
+
+
+```

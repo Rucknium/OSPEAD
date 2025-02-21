@@ -1,0 +1,164 @@
+# Nonparametric Real Spend {#sec-nonparametric-real-spend}
+
+The previous chapter, @sec-bjr-and-patra-sen , gave us the estimated value of the real spend CDF at 101 points. For the parametric fitting step, we need the probability mass function (PMF) value of the real spend age distribution at each of Monero's 100 million spendable RingCT outputs. In this chapter we will also produce summary statistics of the estimated real spend age distribution.
+
+## Reverse the transformation of output age
+
+In the previous chapter, @sec-bjr-and-patra-sen , we obtained an estimate of the real spend age distribution _after_ it was transformed by the CDF of the decoy distribution in @sec-transformed-age . To get back to the un-transformed distribution, we need to compute $G^{-1}(s_{t})$, the inverse CDF (i.e. the quantile function) of the decoy distribution. Let $\hat{F_{S}^{'}}(x)$ be the estimated CDF of the transformed real spend distribution, evaluated at support points $x_{1},x_{2},...,x_{101}$. The value of the estimated un-transformed real spend distribution $\hat{F_{S}}$ at the $i$th support point is defined in @eq-untransformed-real-spend-cdf :
+
+$$
+\hat{F_{S}}\left(\hat{F_{S}^{'}}(x_{i})\right)=G^{-1}(x_{i})
+$$ {#eq-untransformed-real-spend-cdf}
+
+## Interpolation of the CDF
+
+We have evaluated the CDF at only 101 points. We want a smooth interpolation through all points, i.e. every transaction output. @vonHippel_2017 suggest fitting a cubic spline (piecewise polynomial) with monotonicity restrictions. We use the `splinebins()` function in the `binsmooth` package to accomplish the interpolation. Later, the PMF can be computed by taking the first difference of the CDF.
+
+## Computing summary statistics
+
+Having produced the estimated real spend CDF $\hat{F_{S}}$, we can compute summary statistics. Quantiles, including the median, are computed easily by evaluating the inverse CDF at the desired quantile. Other statistics, such as mean, standard deviation, skewness, and kurtosis, can be computed by evaluating a [Riemann–Stieltjes integral](https://en.wikipedia.org/wiki/Riemann%E2%80%93Stieltjes_integral) with the appropriate integrand.
+
+## Code
+
+This code can be run in a new R session.
+
+```{r}
+#| column: page
+
+library(decoyanalysis)
+library(data.table)
+
+cdf.dir <- "weekly-weighted-cdf"
+results.dir <- "results"
+
+results.dir.run <- paste0(results.dir, "/results-01/")
+
+exclusion.weeks <- NULL
+
+nonparametric.real.spend <- list()
+
+for (label in c("all", "rucknium", "rucknium_isthmus")) {
+  
+  results.dir.run.label <- paste0(results.dir.run, "bjr/", label, "/")
+  
+  week.set <- list.files(results.dir.run.label)
+  week.set <- week.set[grepl(".qs", week.set)]
+  
+  weekly.real.spend.cdfs <- list()
+  
+  summary.stats <- data.table(week = week.set, mean = 0, median = 0, sd = 0, skewness = 0, kurtosis = 0)
+  
+  mixing.proportions <- data.table(week = week.set, component_1 = 0,  component_2 = 0,  component_3 = 0,  component_4 = 0)
+  
+  for (week.to.analyze in week.set) {
+    bjr.results <- qs::qread(paste0(results.dir.run.label, week.to.analyze))
+    cat(week.to.analyze, round(100 * rev(sort(bjr.results$mixing.proportions)), 3),  "\n")
+    # print(round(100 * rev(sort(bjr.results$mixing.proportions)), 3))
+    mixing.proportions[week == week.to.analyze, component_1 := rev(sort(bjr.results$mixing.proportions))[1]]
+    mixing.proportions[week == week.to.analyze, component_2 := rev(sort(bjr.results$mixing.proportions))[2]]
+    mixing.proportions[week == week.to.analyze, component_3 := rev(sort(bjr.results$mixing.proportions))[3]]
+    mixing.proportions[week == week.to.analyze, component_4 := rev(sort(bjr.results$mixing.proportions))[4]]
+  }
+  
+  
+  support.max <- 0
+  all.weeks.weighted.v.mean <- c()
+  
+  
+  for (week.to.analyze in setdiff(week.set, exclusion.weeks)) {
+    
+    
+    if (week.to.analyze %in% summary.stats[mean != 0, week]) { next }
+    
+    cat(week.to.analyze, "\n")
+    
+    
+    weekly.weighted.cdf <- qs::qread(paste0(cdf.dir, week.to.analyze))
+    
+    weighted.v.mean <- weekly.weighted.cdf[[1]]$weighted.v.mean
+    all.weeks.weighted.v.mean[week.to.analyze] <- weighted.v.mean
+    weekly.z.max <- weekly.weighted.cdf[[1]]$weekly.z.max
+    support.max <- max(c(support.max, weekly.z.max))
+    weekly.weighted.cdf <- weekly.weighted.cdf[[1]]$weekly.weighted.cdf
+    
+    intermediate.stepfun <- stepfun(seq_along(weekly.weighted.cdf), c(0, weekly.weighted.cdf))
+    
+    weekly.weighted.inv.cdf <- Vectorize(function(x) { gbutils::cdf2quantile(x, cdf = intermediate.stepfun) })
+    
+    bjr.results <- qs::qread(paste0(results.dir.run.label, week.to.analyze))
+    
+    
+    wallet2.dist.index <- which.max(bjr.results$mixing.proportions)
+    Fn.hat.value <- bjr.results$cdf$CDF[, wallet2.dist.index]
+    supp.points <- bjr.results$cdf$cdf.points
+    
+    decoy <- punif
+    Fb <- decoy
+    M = 16
+    alpha <- 1/M
+    
+    patra.sen.bjr.results <- patra.sen.bjr(Fn.hat.value, supp.points, Fb, alpha)
+    
+    Fs.hat <- patra.sen.bjr.results$Fs.hat
+    
+    supp.points.transformed <- vector("numeric", length(supp.points))
+    
+    for (i in seq_along(supp.points)) {
+      if (supp.points[i] < 0.000001) {
+        supp.points.transformed[i] <- 0
+        next
+      }
+      if (supp.points[i] > max(weekly.weighted.cdf)) {
+        # Sometimes max(weekly.weighted.cdf) is not equal to 1
+        supp.points.transformed[i] <- length(weekly.weighted.cdf)
+        next
+      }
+      supp.points.transformed[i] <- weekly.weighted.inv.cdf(supp.points[i])
+    }
+    
+    regularized.real.spend.cdf <- aggregate(Fs.hat, by = list(Fs.hat.transformed = supp.points.transformed), FUN = max)
+    
+    Fs.hat.transformed.reg <- regularized.real.spend.cdf$Fs.hat.transformed
+    supp.points.reg <- regularized.real.spend.cdf$x
+    # Regularized eliminates duplicate support points
+    
+    weekly.real.spend.cdfs[[week.to.analyze]] <- binsmooth::splinebins(
+      bEdges = c(Fs.hat.transformed.reg, max(Fs.hat.transformed.reg) + 1),
+      bCounts = c(diff(c(0, supp.points.reg)), 0))$splineCDF
+    
+    real.spend.ecdf <- stepfun(c(Fs.hat.transformed.reg), c(0, supp.points.reg))
+    
+    days.unit <- weighted.v.mean/(60^2*24)
+    est.mean <- spatstat.univar::stieltjes(function(x){x * days.unit}, real.spend.ecdf)[[1]]
+    est.var <- spatstat.univar::stieltjes(function(x){(x * days.unit - est.mean)^2}, real.spend.ecdf)[[1]]
+    
+    if ( ! week.to.analyze %in% summary.stats$week) {
+      summary.stats <- rbind(summary.stats, data.table(week = week.to.analyze), fill = TRUE)
+    }
+    
+    summary.stats[week == week.to.analyze, mean := est.mean]
+    summary.stats[week == week.to.analyze, median := Fs.hat.transformed.reg[findInterval(0.5, supp.points.reg)] * days.unit ]
+    summary.stats[week == week.to.analyze, percentile.25 := Fs.hat.transformed.reg[findInterval(0.25, supp.points.reg)] * days.unit ]
+    summary.stats[week == week.to.analyze, sd := sqrt(est.var)]
+    summary.stats[week == week.to.analyze, skewness := spatstat.univar::stieltjes(function(x){(x * days.unit - est.mean)^3}, real.spend.ecdf)[[1]] / est.var^(3/2)]
+    summary.stats[week == week.to.analyze, kurtosis := spatstat.univar::stieltjes(function(x){(x * days.unit - est.mean)^4}, real.spend.ecdf)[[1]] / est.var^(2)]
+    
+    
+  }
+  
+  setorder(summary.stats, week)
+  
+  print(summary.stats)
+  
+  nonparametric.real.spend[[label]] <- list(weekly.real.spend.cdfs = weekly.real.spend.cdfs, all.weeks.weighted.v.mean = all.weeks.weighted.v.mean, support.max = support.max,
+    mixing.proportions = mixing.proportions, summary.stats = summary.stats)
+
+}
+
+
+qs::qsave(nonparametric.real.spend, file = paste0(results.dir.run, "nonparametric-real-spend.qs"))
+
+
+
+
+```

@@ -1,0 +1,444 @@
+# Transformed Age {#sec-transformed-age}
+
+When a new block is mined, the distribution of the decoy selection changes a small amount due to several factors:
+
+1)  Outputs in a specific block all have equal probability of being selected, creating a step-function effect. Blocks with many outputs “flatten” the distribution. As those large blocks get older compared to the most recently-mined block, they distort the smooth Gamma density.
+
+2)  Timelocked outputs, especially coinbase outputs, reach their spendable age as new blocks are mined. When timelocked outputs are clustered together, as is the case with P2Pool coinbase outputs, the distribution of spendable outputs can differ at different times.
+
+3)  The decoy selection distribution has a parameter measuring the rate of new outputs being produced per unit of time. When on-chain transaction volume changes, the parameter changes and so does the decoy selection distribution.
+
+4)  Every new spendable output that is added to the blockchain increases the size of the probability distribution's support. The oldest spendable output becomes a little older.
+
+Over the course of a week of data, these factors can produce distributions with differences important enough to matter.
+
+A sample of a random variable that is transformed by the random variable's cumulative distribution function (CDF) will be distributed as a Uniform(0,1) variable. I use this fact to standardize the different decoy selection distributions.
+
+Let $G(s_{t})$ be the CDF of the decoy selection distribution. Let $x_{1},x_{2},...,x_{n}$ be the set of ring member ages of transactions that were constructed at a specific block height. Then, for each $i$ , $G(x_{i})=x_{i}^{'}$ is the transformed value of $x_{i}$.
+
+There is another complication. In 2023, [an off-by-one-block bug was discovered](https://www.getmonero.org/2023/06/08/10block-old-decoy-selection-bug.html) in the `wallet2` reference wallet implementation. The bug was patched in version 0.18.2.2 of `wallet2`, released on April 4, 2023, but it was not a required update. Therefore, users who did not update to the latest software version would be using the old implementation with the off-by-one bug. The simultaneous use of two distributions creates a mixture distribution. In the code below, this problem is handled by computing the old and new versions of the decoy selection distribution and giving them weights. Estimating the share of users who were using the old and new software version was not feasible, so the mixing proportions were guessed. It was assumed that adoption followed a straight linear trend, starting at zero percent in April 2023 and ending at 75 percent in October 2024, the end of the dataset.
+
+The code in this chapter takes about two weeks to finish on a powerful machine. For each of the half-a-million blocks in the dataset, we must compute the probability mass for each of Monero's 100 million on-chain RingCT outputs (50 trillion probability masses in total).
+
+The code should be run in the same R session as before. This is the last script to be run in this session since it will save the relevant data to storage, to be loaded into a new session in the next chapter. Some of the code is based on [a python implementation of Monero's decoy selection algorithm](https://github.com/monero-project/monero/pull/9024) written by jeffro256.
+
+The user can adjust these variables at the beginning of the script:
+
+- `threads`. Number of CPU threads to use. Set to 16 by default.
+
+- `url.rpc`. URL of the Monero node's RPC. `http://127.0.0.1:18081` by default.
+
+- `cdf.dir`, `ring.member.ages.dir`, and `aggregate.cdf.dir`. The names of directories that will be created to hold R data objects in the Quick Serialization `.qs` data format.
+
+## Code
+
+```{r}
+#| column: page
+
+
+threads <- 16
+future::plan(future::multisession(workers = threads))
+
+url.rpc <- "http://127.0.0.1:18081"
+
+cdf.dir <- "weekly-weighted-cdf"
+ring.member.ages.dir <- "weekly-ring-member-ages"
+aggregate.cdf.dir <- "aggregate-weighted-cdf"
+
+
+dir.create(cdf.dir)
+dir.create(ring.member.ages.dir)
+dir.create(aggregate.cdf.dir)
+
+
+
+calculate_num_usable_rct_outputs <- function(crod) {
+
+  CRYPTONOTE_DEFAULT_TX_SPENDABLE_AGE = 10
+
+  # 1
+  num_usable_crod_blocks = length(crod) - (CRYPTONOTE_DEFAULT_TX_SPENDABLE_AGE - 1)
+
+  # 2
+  num_usable_rct_outputs = crod[num_usable_crod_blocks] # R indexes from 1
+
+  return(num_usable_rct_outputs)
+}
+
+
+
+
+dsa.to.uniform <- function(x, block.height, crod, start_height.RingCT, output.index.only.locked, OBOE.prop) {
+# dsa.to.uniform <- function(x, block.height, crod, output.index.only.locked) {
+
+  CRYPTONOTE_DEFAULT_TX_SPENDABLE_AGE = 10
+  DIFFICULTY_TARGET_V2 = 120
+
+  SECONDS_IN_A_YEAR =  60 * 60 * 24 * 365
+  BLOCKS_IN_A_YEAR = SECONDS_IN_A_YEAR / DIFFICULTY_TARGET_V2
+
+  calculate_average_output_flow <- function(crod) {
+    # 1
+    num_blocks_to_consider_for_flow = min(c(length(crod), BLOCKS_IN_A_YEAR))
+
+    # 2
+    if (length(crod) > num_blocks_to_consider_for_flow) {
+      num_outputs_to_consider_for_flow = crod[length(crod)] - crod[ length(crod) - num_blocks_to_consider_for_flow ]
+      # R indexes from 1
+    } else {
+      num_outputs_to_consider_for_flow = crod[length(crod)] # R indexes from 1
+    }
+
+    # 3
+    average_output_flow = DIFFICULTY_TARGET_V2 * num_blocks_to_consider_for_flow / num_outputs_to_consider_for_flow
+
+    return(average_output_flow)
+  }
+
+  calculate_num_usable_rct_outputs <- function(crod) {
+    # 1
+    num_usable_crod_blocks = length(crod) - (CRYPTONOTE_DEFAULT_TX_SPENDABLE_AGE - 1)
+
+    # 2
+    num_usable_rct_outputs = crod[num_usable_crod_blocks] # R indexes from 1
+
+    return(num_usable_rct_outputs)
+  }
+
+
+
+  # crod <- crod[1:(block.height - start_height.RingCT + 1)]
+  crod.at.tx.construction <- crod[1:(block.height - start_height.RingCT)]
+
+  average_output_flow <- calculate_average_output_flow(crod.at.tx.construction)
+  num_usable_rct_outputs <- calculate_num_usable_rct_outputs(crod.at.tx.construction)
+
+  v <- average_output_flow
+  z <- num_usable_rct_outputs
+
+
+  GAMMA_SHAPE = 19.28
+  GAMMA_RATE = 1.61
+
+  CRYPTONOTE_DEFAULT_TX_SPENDABLE_AGE = 10
+  DIFFICULTY_TARGET_V2 = 120
+  DEFAULT_UNLOCK_TIME = CRYPTONOTE_DEFAULT_TX_SPENDABLE_AGE * DIFFICULTY_TARGET_V2
+  RECENT_SPEND_WINDOW = 15 * DIFFICULTY_TARGET_V2
+
+  G <- function(x) {
+    actuar::plgamma(x, shapelog = GAMMA_SHAPE, ratelog = GAMMA_RATE)
+  }
+
+  G_star <- function(x) {
+    (0 <= x*v & x*v <= 1800) *
+      (G(x*v + 1200) - G(1200) +
+          ( (x*v)/(1800) ) * G(1200)
+      )/G(z*v) +
+      (1800 < x*v & x*v <= z*v) * G(x*v + 1200)/G(z*v) +
+      (z*v < x*v) * 1
+  }
+
+
+  crod.reversed <- abs(diff(rev(c(0, crod.at.tx.construction))))[-(1:(CRYPTONOTE_DEFAULT_TX_SPENDABLE_AGE-1))]
+  # Remove first 10 blocks before cumsum() since can't spend from those outputs
+
+  unspendable.indices <- output.index.only.locked[
+    (output.index.only.locked$output_index + 1L) <= as.integer(num_usable_rct_outputs) &
+      output.index.only.locked$output_unlock_time >= as.integer(block.height),
+    "output_index"]
+
+  stopifnot(all(unspendable.indices < num_usable_rct_outputs))
+  unspendable.indices <- abs(unspendable.indices - num_usable_rct_outputs) + 1
+
+
+  crod.reversed.for.OBOE <- crod.reversed
+
+  #if (OBOE.prop != 1) {
+  if (TRUE) {
+
+  crod.reversed <- cumsum(crod.reversed[crod.reversed > 0])
+
+  crod.reversed <- c(0, crod.reversed)
+  # Concatenate zero since the CDF should start at 0
+
+  y_0 <- crod.reversed[-length(crod.reversed)] + 1
+  y_1 <- crod.reversed[-1]
+  dsa.pmf <- (G_star(y_1 + 1) - G_star(y_0)) / (y_1 + 1 - y_0)
+
+  dsa.pmf <- rep(dsa.pmf, times = diff(crod.reversed))
+  dsa.pmf[length(dsa.pmf)] <- dsa.pmf[length(dsa.pmf) - 1]
+  # Replace oldest output's mass by the penultimate one since
+  # it is calculated as a negative mass otherwise
+
+
+  # output.index.only.locked <- copy(output.index.only.locked)
+
+
+
+  # sum.of.unspendable.mass <- sum(dsa.pmf[unspendable.indices])
+
+
+  dsa.pmf[unspendable.indices] <- 0
+
+#  dsa.pmf <- dsa.pmf[ support.endpoints[1]:support.endpoints[2] ]
+
+  dsa.pmf.correct <- dsa.pmf
+  # dsa.pmf.correct <- dsa.pmf/sum(dsa.pmf)
+  # dsa.pmf <- dsa.pmf * 1/(1 - sum.of.unspendable.mass)
+  #  dsa.cdf.correct <- cumsum(dsa.pmf)
+  }
+
+
+  crod.reversed <- crod.reversed.for.OBOE
+
+  first.post.unlock.block <- sum(crod.reversed[1])
+  # NEW ^
+  crod.reversed <- crod.reversed[-(1)]
+  # NEW ^
+
+  crod.reversed <- cumsum(crod.reversed[crod.reversed > 0])
+
+  crod.reversed <- c(0, crod.reversed)
+  # Concatenate zero since the CDF should start at 0
+
+  y_0 <- crod.reversed[-length(crod.reversed)] + 1
+  y_1 <- crod.reversed[-1]
+  dsa.pmf <- (G_star(y_1 + 1) - G_star(y_0)) / (y_1 + 1 - y_0)
+
+  dsa.pmf <- rep(dsa.pmf, times = diff(crod.reversed))
+  dsa.pmf[length(dsa.pmf)] <- dsa.pmf[length(dsa.pmf) - 1]
+
+  dsa.pmf <- c(rep(0, first.post.unlock.block), dsa.pmf)
+
+  dsa.pmf[unspendable.indices] <- 0
+
+#  dsa.pmf <- dsa.pmf[ support.endpoints[1]:support.endpoints[2] ]
+
+  #if (OBOE.prop != 1) {
+  if (TRUE) {
+
+  dsa.pmf.OBOE <- dsa.pmf
+
+  # gc()
+
+  dsa.pmf <- OBOE.prop * dsa.pmf.OBOE + (1 - OBOE.prop) * dsa.pmf.correct
+  rm(dsa.pmf.OBOE, dsa.pmf.correct)
+  }
+
+  dsa.pmf <- dsa.pmf / sum(dsa.pmf)
+
+  dsa.cdf <- cumsum(dsa.pmf)
+
+  return(list(transformed.data = dsa.cdf[x], pmf.contribution = dsa.pmf, v = v, z = z))
+
+}
+
+
+
+
+# closeAllConnections()
+
+
+# https://github.com/monero-project/monero/releases/tag/v0.18.2.2
+# iso week 15 starts on April 10, 2023
+OBOE.est.weeks <- intersect(iso.weeks, c(paste0("2023-", 15:52), paste0("2024-", formatC(1:52, width = 2, flag = "0"))))
+n.weeks.transition <- sum(rev(iso.weeks) %in% OBOE.est.weeks)
+final.state <- 0.25
+
+OBOE.prop.weekly <- rep(1 - 0.02, length(rev(iso.weeks)))
+OBOE.prop.weekly[rev(iso.weeks) %in% OBOE.est.weeks] <- final.state + (1 - final.state) * (seq_len(n.weeks.transition) - 1) / n.weeks.transition
+names(OBOE.prop.weekly) <- rev(iso.weeks)
+
+
+latest.crod <- xmr.rpc(url.rpc = url.rpc, method = "get_output_distribution",
+  params = list(amounts = list(0), from_height = 0, to_height = current.height,
+    binary = FALSE, cumulative = TRUE))
+
+start_height.RingCT <- latest.crod$result$distributions[[1]]$start_height
+latest.crod <- latest.crod$result$distributions[[1]]$distribution
+
+# iso.weeks <- sort(iso.weeks)
+
+
+# for (i in setdiff(rev(iso.weeks), OBOE.est.weeks)) {
+for (i in rev(iso.weeks)) {
+# Compute the most recent week first so the support of all.weeks.weighted.pmf will have
+# the maximum number of output indices
+
+  if (i %in% weeks.missing.mempool.data) { next }
+
+  OBOE.prop <- OBOE.prop.weekly[i]
+
+  xmr.rings.week <- xmr.rings[
+    block_timestamp_ring_isoweek == i,
+    .(block_height_ring, tx_hash, input_num, ring_member_age, is.nonstandard.rucknium, is.nonstandard.isthmus)]
+
+  setorder(xmr.rings.week, -block_height_ring, input_num)
+  # TODO: Do I need to order by input_num too?
+
+  num_usable_rct_outputs.max <- calculate_num_usable_rct_outputs(
+    latest.crod[1:(xmr.rings.week[1, block_height_ring] - start_height.RingCT)])
+
+  # split.ring.member.age <- split(xmr.rings.week[, ring_member_age + 1], xmr.rings.week[, block_height_ring])
+  split.ring.member.age <- split(xmr.rings.week[, .(block_height_ring, ring_member_age)],
+    cut(xmr.rings.week[, block_height_ring], breaks = threads))
+
+  split.ring.member.age <- copy(split.ring.member.age)
+  for (j in seq_along(split.ring.member.age)) {
+    split.ring.member.age[[j]] <- split(split.ring.member.age[[j]][, ring_member_age], split.ring.member.age[[j]][, block_height_ring])
+  }
+  split.ring.member.age <- copy(split.ring.member.age)
+
+  uniformed.ring_member_age <- future.apply::future_lapply(split.ring.member.age, function(block.chunk) {
+
+    transformed.data <- list()
+    weighted.pmf <- vector("numeric", num_usable_rct_outputs.max)
+    n.ring.members.total <- 0
+    v.mean <- 0
+    z.mean <- 0
+    z.max <- 0
+
+    for (block.height in names(block.chunk)) {
+
+      n.ring.members <- length(block.chunk[[block.height]])
+
+      block.chunk[[block.height]] <- unique(block.chunk[[block.height]])
+      # Take unique() to avoid some duplicate computations and
+      # because the data.table will be merged later with xmr.rings.week
+
+      inner.loop.results <- dsa.to.uniform(block.chunk[[block.height]],
+        as.numeric(block.height), latest.crod, start_height.RingCT, output.index.only.locked, OBOE.prop)
+
+      transformed.data[[block.height]] <- inner.loop.results$transformed.data
+      # block.height is character data type here
+
+      if (length(inner.loop.results$pmf.contribution) != num_usable_rct_outputs.max) {
+        inner.loop.results$pmf.contribution <- c(inner.loop.results$pmf.contribution,
+          rep(0, num_usable_rct_outputs.max - length(inner.loop.results$pmf.contribution)))
+      }
+
+      weighted.pmf <- weighted.pmf + inner.loop.results$pmf.contribution * n.ring.members
+
+      n.ring.members.total <- n.ring.members.total + n.ring.members
+
+      v.mean <- v.mean + inner.loop.results$v * n.ring.members
+
+      z.mean <- z.mean + inner.loop.results$z * n.ring.members
+
+      z.max <- max(c(z.max, inner.loop.results$z))
+
+    }
+
+    list(
+      transformed.data = data.table(
+        block_height_ring = rep(as.integer(names(block.chunk)), times = lengths(transformed.data)),
+        ring_member_age = unlist(block.chunk, use.names = FALSE),
+        ring_member_age.transformed = unlist(transformed.data, use.names = FALSE)),
+      weighted.pmf = weighted.pmf,  n.ring.members.total = n.ring.members.total,
+      v.mean = v.mean, z.mean = z.mean, z.max = z.max)
+
+  }, future.globals = c("dsa.to.uniform", "split.ring.member.age", "latest.crod", "output.index.only.locked", "OBOE.prop",
+    "start_height.RingCT", "calculate_average_output_flow", "calculate_num_usable_rct_outputs", "actuar::plgamma",
+    "num_usable_rct_outputs.max"),
+    future.packages = "data.table")
+
+  weighted.pmf <- uniformed.ring_member_age[[1]]$weighted.pmf
+  uniformed.ring_member_age[[1]]$weighted.pmf <- NULL
+
+  for (j in seq_len(length(uniformed.ring_member_age) - 1)) {
+    weighted.pmf  <- weighted.pmf + uniformed.ring_member_age[[j + 1]]$weighted.pmf
+    uniformed.ring_member_age[[j + 1]]$weighted.pmf <- NULL
+  }
+
+  n.ring.members.weekly.total <- sum(sapply(uniformed.ring_member_age, FUN = function(x) {x$n.ring.members.total}))
+
+  weighted.pmf <- weighted.pmf / n.ring.members.weekly.total
+  weighted.v.mean <- sum(sapply(uniformed.ring_member_age, FUN = function(x) {x$v.mean})) / n.ring.members.weekly.total
+  weighted.z.mean <- sum(sapply(uniformed.ring_member_age, FUN = function(x) {x$z.mean})) / n.ring.members.weekly.total
+  weekly.z.max <- max(sapply(uniformed.ring_member_age, FUN = function(x) {x$z.max}))
+  weekly.weighted.cdf <- cumsum(weighted.pmf)
+
+  if (i == rev(iso.weeks)[1]) {
+    all.weeks.weighted.pmf <- weighted.pmf * n.ring.members.weekly.total
+    all.weeks.n.ring.members <- n.ring.members.weekly.total
+    all.weeks.weighted.v.mean <- weighted.v.mean * n.ring.members.weekly.total
+    all.weeks.weighted.z.mean <- weighted.z.mean * n.ring.members.weekly.total
+    all.weeks.weekly.z.max <- weekly.z.max
+  } else {
+    all.weeks.weighted.pmf <- all.weeks.weighted.pmf + n.ring.members.weekly.total *
+      c(weighted.pmf, rep(0, length(all.weeks.weighted.pmf) - length(weighted.pmf)))
+    all.weeks.n.ring.members <- all.weeks.n.ring.members + n.ring.members.weekly.total
+    all.weeks.weighted.v.mean <- all.weeks.weighted.v.mean + weighted.v.mean * n.ring.members.weekly.total
+    all.weeks.weighted.z.mean <- all.weeks.weighted.z.mean + weighted.z.mean * n.ring.members.weekly.total
+    all.weeks.weekly.z.max <- max(c(all.weeks.weekly.z.max, weekly.z.max))
+  }
+
+  rm(weighted.pmf)
+
+  weekly.weighted.cdf <- list(list(weekly.weighted.cdf = weekly.weighted.cdf,
+    weighted.v.mean = weighted.v.mean, weighted.z.mean = weighted.z.mean, weekly.z.max = weekly.z.max))
+  names(weekly.weighted.cdf) <- i
+
+  qs::qsave(weekly.weighted.cdf, file =  paste0(cdf.dir, i, ".qs") )
+  # saveRDS(weekly.weighted.cdf, file =  paste0(cdf.dir, i, ".rds") )
+
+  rm(weekly.weighted.cdf)
+
+  uniformed.ring_member_age <- data.table::rbindlist(lapply(uniformed.ring_member_age, FUN = function(x) {x$transformed.data}))
+
+  stopifnot(uniqueN(uniformed.ring_member_age ) == nrow(uniformed.ring_member_age ))
+
+  xmr.rings.week <- merge(xmr.rings.week, uniformed.ring_member_age, by = c("block_height_ring", "ring_member_age"))
+
+  rm(uniformed.ring_member_age)
+
+  setorder(xmr.rings.week, tx_hash, input_num)
+
+  xmr.rings.week[, ring_mem_id := rep(1:16, nrow(xmr.rings.week)/16)]
+
+  xmr.rings.week <- data.table::dcast(xmr.rings.week,
+    tx_hash + input_num + is.nonstandard.rucknium + is.nonstandard.isthmus ~ ring_mem_id, value.var = "ring_member_age.transformed")
+
+  nonstandard.labels <- xmr.rings.week[, c("is.nonstandard.rucknium", "is.nonstandard.isthmus")]
+
+  set.seed(314)
+
+  xmr.rings.week <- apply(xmr.rings.week, 1, FUN = function(x) {
+    sample(x[(length(x) - 15):length(x)])
+  })
+
+  mode(xmr.rings.week) <- "numeric"
+
+  xmr.rings.week <- t(xmr.rings.week)
+
+  xmr.rings.week <- cbind(nonstandard.labels, xmr.rings.week)
+
+  colnames(xmr.rings.week) <- c("is.nonstandard.rucknium" , "is.nonstandard.isthmus",
+    paste0("ring.member.", formatC(1:16, width = 2, flag = "0")) )
+
+  xmr.rings.week <- list(xmr.rings.week)
+  names(xmr.rings.week) <- i
+
+  qs::qsave(xmr.rings.week, file =  paste0(ring.member.ages.dir, i, ".qs") )
+  # saveRDS(xmr.rings.week, file =  paste0(ring.member.ages.dir, i, ".rds") )
+  # xmr.ring.member.ages
+
+  cat(i, base::date(), "\n")
+
+}
+
+# TODO: Do I need these objects?
+all.weeks.weighted.cdf <- cumsum(all.weeks.weighted.pmf / all.weeks.n.ring.members)
+all.weeks.weighted.v.mean <- all.weeks.weighted.v.mean / all.weeks.n.ring.members
+all.weeks.weighted.z.mean <- all.weeks.weighted.z.mean / all.weeks.n.ring.members
+# all.weeks.weekly.z.max already has the max
+
+qs::qsave(list(all.weeks.weighted.cdf = all.weeks.weighted.cdf,
+    all.weeks.weighted.v.mean = all.weeks.weighted.v.mean,
+    all.weeks.weighted.z.mean = all.weeks.weighted.z.mean,
+    all.weeks.weekly.z.max = all.weeks.weekly.z.max),
+  file = paste0(aggregate.cdf.dir, "aggregate-weeks-cdf.qs"))
+
+
+
+```

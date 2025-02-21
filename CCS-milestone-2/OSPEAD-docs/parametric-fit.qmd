@@ -1,0 +1,433 @@
+# Parametric Fit {#sec-parametric-fit}
+
+Having estimated the nonparametric PMF, we now need to fit a parametric distribution.
+
+First, the weekly PMFs must be aggregated. The value of the weekly PMFs at each support point can simply be averaged. Some weeks are excluded because of data availability problems or exogenous shocks:
+
+- No txpool data for weeks 2023-13 and 2023-14
+- Volatility caused by Binance Monitoring Tag during weeks 2023-51, 2023-52, 2024-01, and 2024-02
+- Binance delisting during week 2024-06
+- Suspected black marble spam during weeks 2024-09, 2024-10, 2024-11, 2024-12, 2024-13, 2024-14, 2024-15, and 2024-16
+- Failure to estimate for unknown reasons for week 2024-19
+
+As stated in @sec-nonparametric-real-spend-mixing-proportions , the mixing proportion of the second-largest component distribution was estimated to be much larger during some of the exogenous events, suggesting inappropriate splitting of the `wallet2` ring distribution. In theory, the first and second estimated components could be re-combined by computing their weighted sum, with the estimated mixing proportions as their weights. The simpler solution is to exclude these weeks as anomalous, which is what I have done.
+
+## Objective function
+
+Usually, fitting a parametric distribution to nonparametric data involves minimization or maximization of an objective function by adjusting the parametric distribution's parameters until the best fit is achieved. In OSPEAD, the new decoy parametric probability distribution will be chosen by minimizing the probability that the Maximum A Posteriori (MAP) Decoder Attack described by @Aeeneh2021 is successful. Let $Z$ be the total number of outputs eligible to be spent in a RingCT ring. Let $f_S$ be the real spend probability mass function (PMF). Let $f_D$ be a proposed decoy PMF. Let $\mathbf{1}\{\}$ be the indicator function that takes value 1 when the statement within the braces is true and 0 otherwise. The average success probability of the MAP Decoder attack is
+
+
+$$
+L_{MAP\:Decoder}=\sum_{i=1}^{Z}f_{S}\left(i\right)\left(\sum_{j=1}^{Z}f_{D}\left(j\right)\mathbf{1}\left\{ \tfrac{f_{S}\left(j\right)}{f_{D}\left(j\right)}<\tfrac{f_{S}\left(i\right)}{f_{D}\left(i\right)}\right\} \right)^{M}
+$$ {#eq-map-decoder-simple}
+
+
+The $f_{S}\left(i\right)$ weights the attack success probability by the probability mass at the $i$th output. Very old outputs are rarely spent, so they are given low weight. @eq-map-decoder-simple can be modified to give more weight to old outputs. The $f_{S}\left(i\right)$ weight can be changed into a convex combination of $f_{S}\left(i\right)$ and giving each output an equal weight, parameterized by $\lambda$: $\left(\lambda f_{S}\left(i\right)+(1-\lambda)\frac{1}{Z}\right)$. The more general objective function is
+
+
+$$
+L_{MAP\:Decoder}(\lambda)=\sum_{i=1}^{Z}\left(\lambda f_{S}\left(i\right)+(1-\lambda)\frac{1}{Z}\right)\sum_{j=1}^{Z}\left(f_{D}\left(j\right)\mathbf{1}\left\{ \tfrac{f_{S}\left(j\right)}{f_{D}\left(j\right)}<\tfrac{f_{S}\left(i\right)}{f_{D}\left(i\right)}\right\} \right)^{M}
+$$ {#eq-map-decoder-lambda}
+
+
+We shall use $\lambda=1$ and $\lambda=0.5$.
+
+## Parametric distributions {#sec-parametric-distributions}
+
+The following parametric distributions will be fit:
+
+- [Gamma](https://en.wikipedia.org/wiki/Gamma_distribution)
+- [Non-central F](https://en.wikipedia.org/wiki/Noncentral_F-distribution)
+- Right-Pareto Lognormal (RPLN) [@ReedJorgensen2004]
+- [Generalized Extreme Value (GEV)](https://en.wikipedia.org/wiki/Generalized_extreme_value_distribution)
+- [Birnbaum-Saunders (BS)](https://en.wikipedia.org/wiki/Birnbaum%E2%80%93Saunders_distribution)
+- [Generalized Beta of the Second Kind (GB2)](https://en.wikipedia.org/wiki/Generalized_beta_distribution#Generalized_beta_of_the_second_kind_(GB2))
+
+Each distribution will be fitted on the raw nonparametric distribution and a log transformation of it.
+
+## Implementation details
+
+### Computational expense
+
+Notice the double summation over $Z$ in @eq-map-decoder-simple . $Z$ is over 100 million. A naive implementation of @eq-map-decoder-simple would require over 10 quadrillion comparisons. Furthermore, @eq-map-decoder-simple needs to be evaluated several hundred times during the numerical optimization algorithm. The computational issues were handled by:
+
+1) Developing a fast implementation of @eq-map-decoder-simple that leverages sorting logic. The implementation is in the code section as `map.decoder.success.prob()` below.
+
+2) Selecting only 10 percent of all outputs as a sample instead of the entire population. The probability of the $i$th output being selected is proportional to the probability mass $f_S(i)$. About 96 percent of the total probability mass is included because high-probability outputs are more likely to be selected.
+
+### Excess tail penalty
+
+During fitting, the probability mass that is older than the oldest output is added back to the rest of the probability distribution. This procedure reflects the fact that a wallet would re-draw a random output that is older than the oldest RingCT output. During fitting, I sometimes observed excessive "flattening" of the probability distribution where the portion of the distribution that extended past the oldest output exceeded 70 percent. There was a need to discourage the optimizer from flattening the distribution.
+
+I added an excess tail penalty. When 10 percent or more of the distribution's mass extends past the oldest output, a proportional penalty is added to the optimizer's objective function.
+
+### Parameter initial values
+
+I use the [Nelder-Mead algorithm](https://en.wikipedia.org/wiki/Nelder%E2%80%93Mead_method) to minimize the objective functions. Nelder-Mead, like most optimization algorithms, needs initial parameter values to start the optimization procedure. The starting values are obtained by drawing 10,000 observations from the real spend distribution and estimating the appropriate maximum likelihood model parameter estimates. Of course, the maximum likelihood methods need starting values. See the documentation of the maximum likelihood R functions in the code below for details. There was no automatic method to select starting values for the noncentral F distribution. In that case, I manually specified reasonable starting values.
+
+## Code {#sec-parametric-fit-code}
+
+This code can be run in a new R session. It may take a day or two to run on a powerful machine.
+
+
+```{r}
+#| column: page
+
+
+library(data.table)
+
+
+results.dir <- "results"
+
+
+excl.weeks <- c("2023-13.qs", "2023-14.qs", "2023-51.qs", "2023-52.qs", "2024-01.qs", "2024-02.qs",
+  "2024-06.qs", "2024-09.qs", "2024-10.qs", "2024-11.qs", "2024-12.qs", "2024-13.qs", "2024-14.qs",
+  "2024-15.qs", "2024-16.qs", "2024-17.qs", "2024-19.qs")
+
+lambda.params <- c(1, 0.5)
+
+
+results.dir.run <- paste0(results.dir, "/results-01/")
+
+
+nonparametric.real.spend <- qs::qread(file = paste0(results.dir.run, "nonparametric-real-spend.qs"))
+
+nonparametric.real.spend <- nonparametric.real.spend$rucknium
+
+
+weekly.real.spend.cdfs <- nonparametric.real.spend$weekly.real.spend.cdfs
+
+all.weeks.weighted.v.mean <- nonparametric.real.spend$all.weeks.weighted.v.mean
+
+weighted.v.mean <- mean(all.weeks.weighted.v.mean)
+
+support.max <- nonparametric.real.spend$support.max
+
+
+
+all.weeks.weighted.v.mean <- all.weeks.weighted.v.mean[! names(all.weeks.weighted.v.mean) %in% excl.weeks]
+
+aggregate.real.spend.pmf <- diff(weekly.real.spend.cdfs[[1]](as.numeric(0:(support.max + 1))))
+
+for (week in setdiff(names(weekly.real.spend.cdfs)[-1], excl.weeks)) {
+  cat(week, "\n")
+  aggregate.real.spend.pmf <- aggregate.real.spend.pmf +
+    diff(weekly.real.spend.cdfs[[week]](as.numeric(0:(support.max + 1))))
+}
+
+aggregate.real.spend.pmf <- aggregate.real.spend.pmf/sum(aggregate.real.spend.pmf)
+
+stopifnot(all.equal(1, sum(aggregate.real.spend.pmf)))
+
+
+
+
+get.decoy.pmf <- function(cdf, v, z, sub.supp, log.trans = FALSE, ...) {
+  
+  G <- function(x) {
+    cdf(x, ...)
+  }
+  
+  if (log.trans) {
+    G_star <- function(x) {
+      G(log1p(x*v))/G(log1p(z*v))
+    }
+  } else {
+    G_star <- function(x) {
+      G(x*v)/G(z*v)
+    }
+  }
+  
+  G_star(sub.supp) - G_star(sub.supp - 1)
+  
+}
+
+
+
+
+
+param.trans <- list()
+
+f_D.lgamma <- function(param, v, z, sub.supp, get.decoy.pmf) {
+  list(decoy.pmf =  get.decoy.pmf(actuar::plgamma, v, z, sub.supp = sub.supp, shapelog = exp(param[1]), ratelog = exp(param[2])),
+    tail.beyond.support = 1 - actuar::plgamma(z*v, shapelog = exp(param[1]), ratelog = exp(param[2])))
+}
+
+param.trans$lgamma <- c(exp, exp)
+
+f_D.gamma <- function(param, v, z, sub.supp, get.decoy.pmf, log.trans) {
+  list(decoy.pmf =  get.decoy.pmf(stats::pgamma, v, z, sub.supp = sub.supp, log.trans = log.trans, shape = exp(param[1]), rate = exp(param[2])),
+    tail.beyond.support = 1 - stats::pgamma(ifelse(log.trans, log1p(z*v), z*v), shape = exp(param[1]), rate = exp(param[2])))
+}
+
+param.trans$gamma <- c(exp, exp)
+
+
+f_D.f <- function(param, v, z, sub.supp, get.decoy.pmf, log.trans) {
+  list(decoy.pmf =  get.decoy.pmf(cdf = stats::pf, v, z, sub.supp, log.trans = log.trans, df1 = exp(param[1]), df2 = exp(param[2]), ncp = exp(param[3])),
+    tail.beyond.support = 1 - stats::pf(ifelse(log.trans, log1p(z*v), z*v),  df1 = exp(param[1]), df2 = exp(param[2]), ncp = exp(param[3])))
+}
+
+param.trans$f <- c(exp, exp, exp)
+
+
+f_D.rpln <- function(param, v, z, sub.supp, get.decoy.pmf, log.trans, return.log = FALSE, ...) {
+  list(decoy.pmf =  get.decoy.pmf(distributionsrd::prightparetolognormal, v, z, sub.supp, log.trans = log.trans, shape2 = exp(param[1]),
+    meanlog = param[2], sdlog = exp(param[3]), lower.tail = TRUE, log.p = FALSE),
+    tail.beyond.support = 1 - distributionsrd::prightparetolognormal(ifelse(log.trans, log1p(z*v), z*v), shape2 = exp(param[1]), meanlog = param[2], sdlog = exp(param[3]), lower.tail = TRUE, log.p = FALSE))
+}
+
+
+param.trans$rpln <- c(exp, I, exp)
+
+f_D.gev <- function(param, v, z, sub.supp, get.decoy.pmf, log.trans) {
+  list(decoy.pmf =  get.decoy.pmf(VGAM::pgev, v, z, sub.supp = sub.supp, log.trans = log.trans, location = param[1], scale = exp(param[2]), shape = param[3]),
+    tail.beyond.support = 1 - VGAM::pgev(ifelse(log.trans, log1p(z*v), z*v), location = param[1], scale = exp(param[2]), shape = param[3]))
+}
+
+param.trans$gev <- c(I, exp, I)
+
+
+f_D.bs <- function(param, v, z, sub.supp, get.decoy.pmf, log.trans) {
+  list(decoy.pmf =  get.decoy.pmf(cdf = bsgof::pbs, v, z, sub.supp, log.trans = log.trans, alpha = exp(param[1]), beta = exp(param[2])),
+    tail.beyond.support = 1 - bsgof::pbs(ifelse(log.trans, log1p(z*v), z*v), alpha = exp(param[1]), beta = exp(param[2])))
+}
+
+param.trans$bs <- c(exp, exp)
+
+
+
+f_D.gb2 <- function(param, v, z, sub.supp, get.decoy.pmf, log.trans) {
+  list(decoy.pmf =  get.decoy.pmf(cdf = GB2::pgb2, v, z, sub.supp, log.trans = log.trans, shape1 = exp(param[1]), scale = exp(param[2]), shape2 = exp(param[3]), shape3 = exp(param[4])),
+    tail.beyond.support = 1 - GB2::pgb2(ifelse(log.trans, log1p(z*v), z*v), shape1 = exp(param[1]), scale = exp(param[2]), shape2 = exp(param[3]), shape3 = exp(param[4])))
+}
+
+param.trans$gb2 <- c(exp, exp, exp, exp)
+
+
+map.decoder.success.prob <- function(f_S, f_D) {
+  # This implementation assumes that every output selected in a ring
+  # is unique (i.e. does not handle multi-output aggregates like 
+  # pseudo-blocks). The inequality comparison is strict.
+  
+  cut.vector <- f_S/f_D
+  rm(f_S)
+  names(cut.vector) <- as.character(1:length(cut.vector))
+  
+  y <- data.table(f_D = f_D, cut.vector.var = cut.vector)
+  
+  setorder(y, cut.vector.var)
+  
+  cut.vector <- sort(cut.vector)
+  cut.vector.unique <- cut.vector[!duplicated(cut.vector)]
+  # Using duplicated() keeps names. unique() does not keep names.
+  cut.vector.name.unique <- as.integer(names(cut.vector.unique))
+  
+  y[, cut.vector.cut := cut.vector.name.unique[ .bincode(cut.vector.var, c(-1, cut.vector.unique), right = FALSE)] ]
+  
+  setorder(y, cut.vector.var)
+  y[, cut.vector.var := NULL]
+  
+  y[, f_D := cumsum(f_D)]
+  rm(f_D)
+  y <- y[, .(success.prob = f_D[.N]), by = cut.vector.cut]
+  
+  y <- merge(y, data.table(cut.vector.cut = cut.vector.name.unique, cut.vector = cut.vector.unique))
+  rm(cut.vector.name.unique)
+  y[, cut.vector.cut := NULL]
+  
+  y <- merge(y, data.table(cut.vector.cut.names = as.integer(names(cut.vector)), cut.vector = unname(cut.vector)),
+    all = TRUE, by = "cut.vector")
+  y[, cut.vector := NULL]
+  setorder(y, cut.vector.cut.names)
+  y[, cut.vector.cut.names := NULL]
+  
+  setDF(y)
+  
+  y$success.prob[is.na(y$success.prob)] <- 0
+  # At the point(s) where f_S/f_D is at a minimum, the attack would always
+  # choose another block height, so the attack success probability is zero
+  
+  y <- y$success.prob
+  
+  # gc()
+  
+  y
+  
+}
+
+
+L_Attack <- function(param, f_D, v, z, sub.supp, theta_i, get.decoy.pmf, map.decoder.success.prob, lambda = 1, log.trans) {
+  
+  f_D.return <- f_D(param, v, z, sub.supp, get.decoy.pmf, log.trans)
+  
+  a_i <- f_D.return$decoy.pmf
+  tail.penalty <- f_D.return$tail.beyond.support
+  rm(f_D.return)
+  
+  if (any(! is.finite(a_i))) { return(1) }
+  a_i[a_i <= 0] <- .Machine$double.eps
+  
+  values.map.decoder.success.prob <- map.decoder.success.prob(f_S = theta_i/sum(theta_i), f_D = a_i/sum(a_i))
+  
+  n.decoys <- 15
+  
+  cat(round(tail.penalty, 5), "<>")
+  tail.penalty <- tail.penalty - 0.10 # 0.05
+  
+  if (tail.penalty <= 0) {tail.penalty <- 0}
+  
+  stopifnot(length(values.map.decoder.success.prob) == length(theta_i))
+  
+  weight <- lambda * (theta_i/sum(theta_i)) + (1 - lambda) * 1/length(theta_i)
+  
+  sum(weight * (values.map.decoder.success.prob)^n.decoys) + tail.penalty
+  
+}
+
+
+theta_i <- aggregate.real.spend.pmf
+theta_i[theta_i == 0] <- .Machine$double.eps
+
+z <- length(theta_i)
+v <- mean(all.weeks.weighted.v.mean)
+
+set.seed(314)
+sub.supp <- wrswoR::sample_int_expj(length(theta_i), ceiling(length(theta_i)/10), prob = theta_i)
+# wrswoR::sample_int_expj is much faster than sample() when the prob vector is long
+# start at 2 so G(x - 1) is not 0
+sub.supp <- sort(sub.supp)
+theta_i <- theta_i[sub.supp]
+
+
+gen.data <- stepfun( cumsum(theta_i/sum(theta_i)), c(0, as.numeric(sub.supp)) )
+
+
+mle.generated.data <- gen.data(runif(10000))
+mle.generated.data <- mle.generated.data[mle.generated.data > 0]
+
+
+gamma.fit <- Rfast::gammamle(mle.generated.data)
+gamma.fit.coef <- log(gamma.fit$param)
+
+gamma.fit <- Rfast::gammamle(log1p(mle.generated.data))
+gamma.fit.coef.log <- log(gamma.fit$param)
+
+
+f.fit <- fitdistrplus::fitdist(mle.generated.data, "f", method = "mle", start = list(df1 = exp(-1), df2 = exp(0), ncp = exp(2)))
+f.fit.coef <- log(coef(f.fit))
+
+f.fit <- fitdistrplus::fitdist(log1p(mle.generated.data), "f", method = "mle", start = list(df1 = exp(-1), df2 = exp(0), ncp = exp(2)))
+f.fit.coef.log <- log(coef(f.fit))
+
+
+rpln.fit <- distributionsrd::rightparetolognormal.mle(mle.generated.data)
+rpln.fit.coef <- c(log(rpln.fit$coefficients[["shape2"]]), rpln.fit$coefficients[["meanlog"]],
+  log(rpln.fit$coefficients[["sdlog"]]) )
+
+rpln.fit <- distributionsrd::rightparetolognormal.mle(log1p(mle.generated.data))
+rpln.fit.coef.log <- c(log(rpln.fit$coefficients[["shape2"]]), rpln.fit$coefficients[["meanlog"]],
+  log(rpln.fit$coefficients[["sdlog"]]) )
+
+
+gev.fit <- VGAM::vglm(mle.generated.data ~ 1, VGAM::gevff, control = VGAM::vglm.control(maxit = 1000, trace = TRUE))
+gev.fit.coef <- VGAM::Coef(gev.fit)
+gev.fit.coef[2] <- log(gev.fit.coef[2])
+
+gev.fit <- VGAM::vglm(log1p(mle.generated.data) ~ 1, VGAM::gevff, control = VGAM::vglm.control(maxit = 1000, trace = TRUE))
+gev.fit.coef.log <- VGAM::Coef(gev.fit)
+gev.fit.coef.log[2] <- log(gev.fit.coef.log[2])
+
+
+bs.fit <- bsgof::bs.mle(mle.generated.data)
+bs.fit.coef <- log(c(bs.fit$alpha, bs.fit$beta))
+
+bs.fit <- bsgof::bs.mle(log1p(mle.generated.data))
+bs.fit.coef.log <- log(c(bs.fit$alpha, bs.fit$beta))
+
+gb2.fit <- GB2::mlfit.gb2(mle.generated.data)
+gb2.fit.coef <- log(gb2.fit[[2]]$par)
+
+gb2.fit <- GB2::mlfit.gb2(log1p(mle.generated.data + 1))
+gb2.fit.coef.log <- log(gb2.fit[[2]]$par)
+
+
+run.iters.simple <- expand.grid(
+  f_D = c(
+    f_D.gamma = f_D.gamma,
+    f_D.f = f_D.f,
+    f_D.rpln = f_D.rpln,
+    f_D.gev = f_D.gev,
+    f_D.bs = f_D.bs,
+    f_D.gb2 = f_D.gb2
+  ),
+  flavor = 1,
+  week = 0,
+  est.method = 0,
+  L = c(L_Attack = L_Attack),
+  lambda = lambda.params,
+  log.trans = c(FALSE, TRUE)
+)
+
+
+
+start.params <- list(
+  f_D.gamma = list(no.log = gamma.fit.coef, log = gamma.fit.coef.log),
+  f_D.f = list(no.log = f.fit.coef, log = f.fit.coef.log),
+  f_D.rpln = list(no.log = rpln.fit.coef, log = rpln.fit.coef.log),
+  f_D.gev = list(no.log = gev.fit.coef, log = gev.fit.coef.log),
+  f_D.bs = list(no.log = bs.fit.coef, log = bs.fit.coef.log),
+  f_D.gb2 = list(no.log = gb2.fit.coef, log = gb2.fit.coef.log))
+
+
+
+
+
+threads <- floor(nrow(run.iters.simple)/2)
+future::plan(future::multisession(workers = threads))
+
+keep.time <- base::date()
+
+fit.results <- future.apply::future_lapply(1:nrow(run.iters.simple), function(iter) {
+  
+  f_D.fun <- run.iters.simple$f_D[[iter]]
+  L.fun <- run.iters.simple$L[[iter]]
+  flavor <- run.iters.simple$flavor[[iter]]
+  lambda <- run.iters.simple$lambda[[iter]]
+  log.trans <- run.iters.simple$log.trans[[iter]]
+  if (log.trans) {
+    start.params.optim <- start.params[[names(run.iters.simple$f_D[iter])]]$log
+  } else {
+    start.params.optim <- start.params[[names(run.iters.simple$f_D[iter])]]$no.log
+  }
+  
+  
+  optim.results <- optim(
+    start.params.optim,
+    L.fun,
+    f_D = f_D.fun,
+    v = v,
+    z = z,
+    sub.supp = sub.supp,
+    get.decoy.pmf = get.decoy.pmf,
+    map.decoder.success.prob = map.decoder.success.prob,
+    log.trans = log.trans,
+    lambda = lambda, 
+    method = "Nelder-Mead", 
+    control = list(trace = 6, maxit = 10000),
+    theta_i = theta_i)
+  
+  optim.results
+  
+}, future.globals = c("run.iters.simple", "start.params", "v", "z", "sub.supp", "get.decoy.pmf",
+  "map.decoder.success.prob", "theta_i", "lamba.iter"),
+  future.packages = "data.table", future.seed = TRUE)
+
+print(keep.time)
+base::date()
+
+
+
+
+
+```

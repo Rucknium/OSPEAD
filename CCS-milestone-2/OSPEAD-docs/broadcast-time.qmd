@@ -1,0 +1,154 @@
+# Broadcast Time
+
+A transaction's distribution of decoys is based on the time of transaction construction, not on the time that it is confirmed on the blockchain. Since most transactions are confirmed shortly after being broadcast, blockchain confirmation time is nonetheless a good approximation of transaction construction time. However, we can improve over this approximation by using ephemeral data about when broadcasted transactions arrived in nodes' txpools, which has been collected since late December 2022.
+
+The transaction construction times are computed as follows:
+
+- From August 2022 to December 2022, txpool archive data is not available. During this period of time, most mining pools delayed first confirmation by one block [@Rucknium2023a]. Therefore, the block height of construction of every transaction during this period is assumed to be two blocks before the block it was confirmed in. It is two blocks instead of one because a transaction cannot be constructed based on the data in its own block, since the wallet wouldn't have the block information yet at the time of construction.
+
+- For the remainder of the data (with an exception explained below), the block height of construction was assumed to be the current block height at the time that nodes received the transaction in their txpools. If a transaction appeared on the blockchain but not in the txpool data, it is assumed that the transaction was constructed immediately prior to the block it was confirmed in.
+
+- ISO weeks 2023-13 and 2023-14 are missing txpool data. Data from these weeks will be excluded from the later analysis.
+
+The largest discrepancy between the time of construction and time of confirmation occurred during the March 2024 suspected spam attack [@Rucknium2024a].
+
+This code should be run in the same R session as previous chapters.
+
+## Code
+
+```{r}
+#| column: page
+
+
+threads <- 16
+future::plan(future::multisession(workers = threads))
+
+
+blocks <- rbind(
+fread("xmr-block-archive-2023-01-18-20-48-07.csv"),
+fread("xmr-block-archive-2023-03-09-12-20-37.csv"),
+fread("xmr-block-archive-2024-01-14-07-00-47.csv"),
+fread("xmr-block-archive-2024-03-11-20-32-01.csv"),
+fread("xmr-block-archive-2023-12-27-20-14-43.csv"),
+fread("xmr-block-archive-exporttime-2024-10-20-21-39-50.csv"),
+fread("xmr-block-archive-exporttime-2024-10-21-17-06-02.csv")
+)
+
+
+
+blocks <- blocks[blocks$block_height != 0, ]
+setorder(blocks, block_height, block_receive_time)
+blocks <- unique(blocks, by = "block_height")
+
+
+mempool <- rbind(
+fread("xmr-mempool-archive-2023-01-18-20-48-07.csv"),
+fread("xmr-mempool-archive-2023-03-09-12-20-37.csv"),
+fread("xmr-mempool-archive-2024-01-14-07-00-47.csv"),
+fread("xmr-mempool-archive-2024-03-11-20-32-01.csv"),
+fread("xmr-mempool-archive-2023-12-27-20-14-43.csv"),
+fread("xmr-txpool-archive-exporttime-2024-10-20-21-39-50.csv"),
+fread("xmr-txpool-archive-exporttime-2024-10-21-17-06-02.csv")
+)
+
+
+setorder(mempool, receive_time)
+mempool <- unique(mempool, by = "id_hash")
+
+setnames(blocks, "block_receive_time", "canon.block_receive_time")
+setnames(mempool, "receive_time", "canon.receive_time")
+
+# Some of this script taken from https://github.com/Rucknium/misc-research/blob/main/Monero-TX-Confirm-Delay/xmr-data-prep.R
+
+
+block_height.unique <- blocks[, na.omit(unique(block_height))]
+
+all.blocks <- min(block_height.unique[block_height.unique > 0]):max(block_height.unique)
+# min():max() since some blocks are "skipped"
+# Need to have positive since rarely block height is corrupted  in RPC response
+# to "0"
+
+
+
+blockchain.data <- future.apply::future_lapply(seq_along(all.blocks), function(i) {
+
+  block.data <- xmr.rpc(url.rpc = "http://127.0.0.1:58081/json_rpc", method = "get_block",
+    params = list(height = all.blocks[i]))$result
+
+  if (length(block.data$tx_hashes) > 0) {
+    y <- data.table::data.table(
+      block_height = all.blocks[i],
+      id_hash = block.data$tx_hashes,
+      block_num_txes = block.data$block_header$num_txes,
+      block_reward = block.data$block_header$reward
+    )
+  } else {
+    y <- data.table::data.table(
+      block_height = all.blocks[i],
+      id_hash = "<NO_TXS_IN_BLOCK>",
+      block_num_txes = block.data$block_header$num_txes,
+      block_reward = block.data$block_header$reward
+    )
+  }
+  return(y)
+})
+
+
+blockchain.data <- data.table::rbindlist(blockchain.data)
+
+blocks.filled <- merge(data.table(block_height = all.blocks),
+  blocks[, c("block_height", "canon.block_receive_time")], all = TRUE)
+
+rm(blocks)
+
+blocks.filled$canon.block_receive_time <- zoo::na.locf(blocks.filled$canon.block_receive_time, fromLast = TRUE)
+
+blockchain.data <- merge(blocks.filled, blockchain.data)
+
+blockchain.data <- merge(blockchain.data, mempool, by = "id_hash", all = TRUE)
+
+rm(mempool)
+
+
+
+mempool.archive.blocks <- unique(blockchain.data[, .(block_height, canon.block_receive_time)])
+mempool.archive.blocks <- mempool.archive.blocks[complete.cases(mempool.archive.blocks), ]
+# As of now, this only eliminates a single row that has block_height = NA, canon.block_receive_time = NA
+mempool.archive.blocks <- rbind(mempool.archive.blocks,
+  data.table(block_height = min(mempool.archive.blocks$block_height), canon.block_receive_time = 0))
+# Fill in missing data from beginning of dataset when we findInterval() below
+setorder(mempool.archive.blocks, canon.block_receive_time)
+
+blockchain.data[, block_height.at.construction :=
+  mempool.archive.blocks$block_height[findInterval(canon.receive_time, mempool.archive.blocks$canon.block_receive_time)] ]
+
+blockchain.data[block_height - block_height.at.construction <= 0, block_height.at.construction := block_height - 1]
+
+setnames(blockchain.data, "block_height.at.construction", "block_height_ring.at.construction")
+
+blockchain.data <- blockchain.data[ (! duplicated(id_hash)) | id_hash == "<NO_TXS_IN_BLOCK>", ]
+
+xmr.rings <- merge(xmr.rings, blockchain.data[, .(id_hash, block_height_ring.at.construction)], by.x = "tx_hash", by.y = "id_hash", all.x = TRUE)
+
+rm(blockchain.data)
+
+xmr.rings[substr(block_timestamp_ring_isoweek, 1, 4) == 2022, block_height_ring.at.construction := block_height_ring - 2]
+# Assume all txs had a delay of one block, before the mining pool config fix in January 2023.
+
+
+weeks.missing.mempool.data <- c("2023-13", "2023-14")
+
+xmr.rings[ is.na(block_height_ring.at.construction) & ! block_timestamp_ring_isoweek %chin% weeks.missing.mempool.data,
+  block_height_ring.at.construction := block_height_ring - 1]
+# The rest, if the tx "skipped" the mempool, assume that the tx was constructed right before the block it was
+# confirmed in. Exclude 2023-13 and 2023-14 weeks since we are missing mempool data for those weeks.
+
+
+stopifnot(all(complete.cases(
+  xmr.rings[! block_timestamp_ring_isoweek %chin% weeks.missing.mempool.data,
+   .(block_height_ring.at.construction, youngest.output.index, ring_member_age)]))
+)
+
+
+
+```

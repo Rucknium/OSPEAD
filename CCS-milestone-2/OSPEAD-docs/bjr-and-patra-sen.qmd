@@ -1,0 +1,150 @@
+# BJR and Patra-Sen {#sec-bjr-and-patra-sen}
+
+This chapter performs the Bonhomme-Jochmans-Robin (BJR) and Patra-Sen estimation. @sec-bjr-explanation and @sec-patra-sen-explanation explain the purpose of the BJR and Patra-Sen estimators, respectively.
+
+The BJR estimator takes the transformed age data from @sec-transformed-age as input. It outputs four estimated nonparametric cumulative distribution functions (CDFs) of the four components of the mixture distribution and their estimated mixing proportions. It estimates the CDFs at 101 support points: $\{0.001,0.01,0.02,...,0.98,0.99,0.999\}$. For a good estimate of the CDFs, I set the support points to have roughly equal probability mass between them. We have transformed the data into a roughly uniform distribution, so the CDF support points are set at a uniform distance from each other, between 0 and 1.
+
+The estimated component with the highest mixing proportion is selected. This component is used as an input to the Patra-Sen estimator. A Uniform(0,1) distribution is used for the "decoy" distribution, $F_{b}(x)$. The output of the Patra-Sen estimation is the estimated real spend distribution.
+
+We could stop here, but we can do a second-pass estimation for better results. The estimated real spend distribution from the initial Patra-Sen estimation will not have roughly equal probability mass between each CDF support point. We can interpolate the estimated real spend CDF to get new CDF support points that do have roughly equal probability mass between each point. Then the BJR estimation is performed again with the new CDF support points.
+
+This procedure is followed three times:
+
+1) With all rings
+2) With all rings except for those marked as `is.nonstandard.rucknium`
+3) With all rings except for those marked as `is.nonstandard.rucknium` and/or `is.nonstandard.isthmus`
+
+The results from these three data subsets can be compared.
+
+This code will take about two weeks to run on a powerful machine. The code in this chapter can run while the code in @sec-transformed-age is running, but it needs to stay "behind" the transformed age data as it is being written to the `cdf.dir` and `ring.member.ages.dir` directories.
+
+The `threads` variable is the number of CPU threads to use. The `cdf.dir` and `ring.member.ages.dir` variables should be the same as specified in the previous chapter, @sec-transformed-age . `results.dir` is the name of the directory where the BJR estimate will be written to.
+
+## Code
+
+```{r}
+#| column: page
+
+library(decoyanalysis)
+library(future)
+library(data.table)
+
+threads <- 64 - 17
+
+cdf.dir <- "weekly-weighted-cdf"
+ring.member.ages.dir <- "weekly-ring-member-ages"
+results.dir <- "results"
+
+
+
+dir.create(results.dir)
+
+results.dir.run <- paste0(results.dir, "/results-01/")
+
+dir.create(results.dir.run)
+
+results.dir.run.bjr <- paste0(results.dir, "bjr/")
+
+dir.create(results.dir.run.bjr)
+
+
+options(future.globals.maxSize = 8000*1024^2)
+
+future::plan(future::multicore(workers = threads))
+
+cluster.threads <- NULL
+
+is.raw <- FALSE
+
+if (is.raw) {
+  ring.member.ages.dir <- "weekly-ring-member-ages-raw"
+}
+
+
+
+
+for (i in c("all", "rucknium", "rucknium_isthmus")) {
+  dir.create(paste0(results.dir.run.bjr, i))
+  dir.create(paste0(results.dir.run.bjr, i, "/first-pass"))
+}
+
+xmr.rings.ages.weeks <- list.files(ring.member.ages.dir)
+xmr.rings.ages.weeks <- xmr.rings.ages.weeks[grepl(".qs", xmr.rings.ages.weeks)]
+already.done <- Reduce(intersect, list(list.files(paste0(results.dir.run.bjr, "all")),
+  list.files(paste0(results.dir.run.bjr, "rucknium")), list.files(paste0(results.dir.run.bjr, "rucknium_isthmus"))))
+xmr.rings.ages.weeks <- setdiff(xmr.rings.ages.weeks, already.done)
+xmr.rings.ages.weeks <- rev(sort(xmr.rings.ages.weeks))
+
+
+II <- 10
+K <- 4
+
+# cdf.points <- (0:100)/100
+cdf.points <- c(0.001, (1:99)/100, 0.999)
+#cdf.points <- c(0.0001, (1:99)/100, 0.9999)
+# Distribution should be approximately uniform
+
+
+
+while ( length(xmr.rings.ages.weeks) > 0) {
+  week <- xmr.rings.ages.weeks[1]
+
+  y.with.labels <- qs::qread(paste0(ring.member.ages.dir, week))[[1]]
+
+  if (is.raw) {
+    cdf.points <- unname(quantile(c(y), probs = (0:100)/100, na.rm = TRUE))
+  }
+
+  for (label in c("all", "rucknium", "rucknium_isthmus")) {
+
+
+    if ( ! (label == "rucknium_isthmus" &
+        y.with.labels[, sum(is.nonstandard.rucknium) == sum(is.nonstandard.rucknium | is.nonstandard.isthmus)] ) ) {
+      # If is.nonstandard.isthmus does not have additional TRUEs, then just skip and output the Rucknium one
+
+      y <- switch(label,
+        all = y.with.labels[, -(1:2), with = FALSE],
+        rucknium = y.with.labels[! y.with.labels$is.nonstandard.rucknium, -(1:2), with = FALSE],
+        rucknium_isthmus = y.with.labels[! y.with.labels$is.nonstandard.rucknium &
+            ! y.with.labels$is.nonstandard.isthmus, -(1:2), with = FALSE])
+
+      print(system.time(bjr.results <- bjr(y, II = II, K = K, cdf.points = cdf.points,
+        estimate.mean.sd = FALSE, basis = "Chebychev", control = list(cluster.threads = cluster.threads ))))
+        
+      qs::qsave(bjr.results, file = paste0(results.dir.run.bjr, label, "/first-pass/", week))
+
+      wallet2.dist.index <- which.max(bjr.results$mixing.proportions)
+      Fn.hat.value <- bjr.results$cdf$CDF[, wallet2.dist.index]
+      supp.points <- bjr.results$cdf$cdf.points
+      decoy <- punif
+      Fb <- decoy
+      M = 16
+      alpha <- 1/M
+
+      patra.sen.bjr.results <- patra.sen.bjr(Fn.hat.value, supp.points, Fb, alpha)
+
+      new.cdf.points <-  approx(c(0, patra.sen.bjr.results$Fs.hat, 1), c(0, supp.points, 1), supp.points)$y
+
+      print(system.time(bjr.results.new <- bjr(y, II = II, K = K, cdf.points = new.cdf.points,
+        estimate.mean.sd = FALSE, basis = "Chebychev", control = list(cluster.threads = cluster.threads ))))
+
+    }
+
+    qs::qsave(bjr.results.new, file = paste0(results.dir.run.bjr, label, "/", week))
+
+  }
+  
+  xmr.rings.ages.weeks <- list.files(ring.member.ages.dir)
+  xmr.rings.ages.weeks <- xmr.rings.ages.weeks[grepl(".qs", xmr.rings.ages.weeks)]
+  already.done <- Reduce(intersect, list(list.files(paste0(results.dir.run.bjr, "all")),
+    list.files(paste0(results.dir.run.bjr, "rucknium")), list.files(paste0(results.dir.run.bjr, "rucknium_isthmus"))))
+  xmr.rings.ages.weeks <- setdiff(xmr.rings.ages.weeks, already.done)
+  xmr.rings.ages.weeks <- rev(sort(xmr.rings.ages.weeks))
+
+  cat(week, "\n")
+
+}
+
+
+
+```

@@ -1,0 +1,49 @@
+project:
+  type: book
+  preview:
+    port: 4200
+    browser: false
+    navigate: false
+  resources:
+    - "images/*"
+    - "js/*"
+    - "css/*"
+    - "octave/*"
+
+book:
+  title: "OSPEAD-docs"
+  author: "Rucknium"
+  date: "January 15, 2024"
+  chapters:
+    - index.qmd
+    - requirements.qmd
+    - successful-simulation.qmd
+    - ring-gathering.qmd
+    - nonstandard-transactions.qmd
+    - broadcast-time.qmd
+    - miscellaneous-preparation.qmd
+    - transformed-age.qmd
+    - bjr-and-patra-sen.qmd
+    - nonparametric-real-spend.qmd
+    - real-spend-visualization.qmd
+    - parametric-fit.qmd
+    - performance-evaluation.qmd
+    - appendix-bjr-benchmarks.qmd
+    - references.qmd
+
+bibliography: references.bib
+bibliographystyle: apa
+
+format:
+  html:
+    theme: superhero
+    highlight-style: gruvbox
+    html-math-method: mathml
+    fig-cap-location: top
+  pdf:
+    documentclass: scrreprt
+
+editor: visual
+
+execute: 
+  enabled: false
