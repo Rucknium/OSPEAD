@@ -51,6 +51,12 @@ remotes::install_github("Rucknium/OSPEAD",
   subdir = "CCS-milestone-2/decoyanalysis", upgrade = FALSE)
 ```
 
+On Linux, you may have to install the `liblapack-dev` system package first:
+
+```bash
+sudo apt install liblapack-dev
+```
+
 ### Funding
 
 Most of this research was funded by [Monero's Community Crowdfunding System (CCS)](https://ccs.getmonero.org/proposals/Rucknium-OSPEAD-Fortifying-Monero-Against-Statistical-Attack.html). Thank you to all donors!
