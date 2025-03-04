@@ -73,15 +73,15 @@ Most of this research was funded by [Monero's Community Crowdfunding System (CCS
 
 In addition to the work directly on the Monero data, I analyzed other blockchains independently to show that the OSPEAD techniques work in realistic scenarios. In a small simulation, I took the Litecoin blockchain data, simulated ring signatures onto it, applied the OSPEAD techniques, and showed that [OSPEAD produced accurate estimates of the original Litecoin distribution](https://rucknium.github.io/OSPEAD/CCS-milestone-2/OSPEAD-docs/_book/successful-simulation.html#plots). I also analyzed other chains to give context about the reasonableness of the OSPEAD estimates of Monero's real spend age distribution, especially the plausibility of large changes in the real spend age distribution from week to week, which are also observed on the transparent UTXO-based payment coins like Bitcoin, Litecoin, Bitcoin Cash, and Dogecoin.
 
-**Q: Does OSPEAD use machine learning techniques?**
+**Q: Does OSPEAD use machine learning techniques or artificial intelligence (AI)?**
 
-**A:** No. OSPEAD uses techniques that are within the traditional statistics paradigm. There is no "training set" or similar idea.
+**A:** No. OSPEAD uses techniques that are within the traditional statistics paradigm. There is no "training set" or similar idea, nor is there an AI "black box".
 
 **Q: Does the MAP Decoder attack work by eliminating decoys?**
 
 **A:** No. Decoys aren't completely eliminated. The MAP Decoder attack guesses that the most likely ring member is the real spend. The guess is correct 23.5% of the time.
 
-Think of it this way: there are 16 horses scheduled for a race. The horses are not equally fast. According to the betting markets, one of the horses has a 1-in-4.2 odds of winning. The MAP Decoder attack does _not_ remove 12 out of the 16 horses from the race, and then randomly pick among the remaining 4 with equal probability. Instead, it always bets on the one horse that is most likely to win. It wins the bet (guesses correctly) in 1 out of 4.2 races.
+Think of it this way: there are 16 horses scheduled for a race. The horses are not equally fast. According to the betting markets, one of the horses has a 1-in-4.2 probability of winning. The MAP Decoder attack does _not_ remove 12 out of the 16 horses from the race, and then randomly pick among the remaining 4 with equal probability. Instead, it always bets on the one horse that is most likely to win. It wins the bet (guesses correctly) in 1 out of 4.2 races.
 
 **Q: Are all transactions equally vulnerable to the attack?**
 
