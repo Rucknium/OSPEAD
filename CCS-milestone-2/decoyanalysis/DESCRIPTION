@@ -1,7 +1,7 @@
 Package: decoyanalysis
 Type: Package
 Title: Separate real and decoy distributions
-Version: 0.1.2
+Version: 0.2.0
 Date: 2025-03-16
 Authors@R: 
     c(person(family = "Rucknium",
@@ -18,6 +18,7 @@ Description: Implements the Bonhomme-Jochmans-Robin (2016) and
 License: GPL (>= 2)
 Encoding: UTF-8
 Imports:
+  data.table,
   pracma,
   Matrix,
   JADE,
@@ -25,7 +26,8 @@ Imports:
   future,
   future.apply,
   parallelly,
-  Iso
+  Iso,
+  wrswoR
 RoxygenNote: 7.3.2
 Suggests: 
     testthat (>= 3.0.0),
