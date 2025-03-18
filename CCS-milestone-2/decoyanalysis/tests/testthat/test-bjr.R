@@ -4,31 +4,30 @@ skip.R.tests <- FALSE
 
 
 testthat::test_that("Rust implementation of est.AA.inner() matches R implementation (Monte Carlo, Chebychev as basis)", {
-  
+
   # testthat::skip("Rust implementation of est.AA.inner() not ready")
-  
+
   restore.plan <- future::plan()
   on.exit(future::plan(restore.plan))
   # Save the multi-threaded future plan that the user has set so it can be restored later
   future::plan(future::sequential())
-  
+
   cdf.points = seq(-4, 7, by = .25)
-  
+
   withr::with_preserve_seed({ y <- gen.standard.bjr.test.dataset() })
   # Don't affect the random seed in the R global environment
   K <- 2
-  
+
   bjr.validation.R <- bjr(y, II = 10, K = K, basis = "Chebychev",
     cdf.points = cdf.points, estimate.mean.sd = FALSE,
     debug.return = "after est.AA.inner")
-  
+
   bjr.validation.Rust <- bjr(y, II = 10, K = K, basis = "Chebychev",
     cdf.points = cdf.points, estimate.mean.sd = FALSE,
     use.Rust = TRUE, debug.return = "after est.AA.inner")
-  
-  testthat::expect_equal(bjr.validation.Rust$B4, bjr.validation.R$B4,
-    tolerance = 1e-14)
-  
+
+  testthat::expect_equal(bjr.validation.C, bjr.validation.R, tolerance = 1e-14)
+
 })
 
 
@@ -36,60 +35,69 @@ testthat::test_that("Rust implementation of est.AA.inner() matches R implementat
 
 
 testthat::test_that("Rust implementation of est.cdf.and.mixing.prop.inner() matches R implementation (Monte Carlo, Chebychev as basis)", {
-  
+
   # testthat::skip("Rust implementation of est.cdf.and.mixing.prop.inner() not ready")
-  
+
   restore.plan <- future::plan()
   on.exit(future::plan(restore.plan))
   # Save the multi-threaded future plan that the user has set so it can be restored later
   future::plan(future::sequential())
 
   cdf.points = seq(-4, 7, by = .25)
-  
+
   withr::with_preserve_seed({ y <- gen.standard.bjr.test.dataset() })
   # Don't affect the random seed in the R global environment
   K <- 2
-  
+
   bjr.validation.R <- bjr(y, II = 10, K = K, basis = "Chebychev",
     cdf.points = cdf.points, estimate.mean.sd = FALSE,
     debug.return = "after est.cdf.and.mixing.prop.inner")
-  
+
   bjr.validation.Rust <- bjr(y, II = 10, K = K, basis = "Chebychev",
     cdf.points = cdf.points, estimate.mean.sd = FALSE,
     use.Rust = TRUE, debug.return = "after est.cdf.and.mixing.prop.inner")
-  
+
   testthat::expect_equal(bjr.validation.Rust$B4, bjr.validation.R$B4,
     tolerance = 1e-14)
-  
+
+  bjr.validation.R$g <- NULL
+  bjr.validation.Rust$g <- NULL
+  # Function g() captures its environment, so it will have
+  # different values for `use.Rust`. It is irrelevant to
+  # testing equality of R and Rust implementations, so delete it.
+
+  testthat::expect_equal(bjr.validation.Rust, bjr.validation.R,
+    tolerance = 1e-14)
+
 })
 
 
 
 testthat::test_that("Overall Rust implementation of parts of bjr() matches R implementation (Monte Carlo, Chebychev as basis)", {
-  
+
   # testthat::skip("Overall Rust implementation of parts of bjr() not ready")
-  
+
   restore.plan <- future::plan()
   on.exit(future::plan(restore.plan))
   # Save the multi-threaded future plan that the user has set so it can be restored later
   future::plan(future::sequential())
-  
+
   cdf.points = seq(-4, 7, by = .25)
-  
+
   withr::with_preserve_seed({ y <- gen.standard.bjr.test.dataset() })
   # Don't affect the random seed in the R global environment
   K <- 2
-  
+
   bjr.validation.R <- bjr(y, II = 10, K = K, basis = "Chebychev",
     cdf.points = cdf.points, estimate.mean.sd = FALSE)
-  
+
   bjr.validation.Rust <- bjr(y, II = 10, K = K, basis = "Chebychev",
     cdf.points = cdf.points, estimate.mean.sd = FALSE,
     use.Rust = TRUE)
-  
-  testthat::expect_equal(bjr.validation.Rust$B4, bjr.validation.R$B4,
+
+  testthat::expect_equal(bjr.validation.Rust, bjr.validation.R,
     tolerance = 1e-14)
-  
+
 })
 
 
