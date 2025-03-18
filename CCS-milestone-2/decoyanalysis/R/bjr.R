@@ -9,7 +9,7 @@
 #' @param estimate.mean.sd Estimate mean and sd?
 #' @param estimate.cdf Estimate CDF?
 #' @param estimate.mixing.prop Estimate mixing proportions?
-#' @param use.C Use C implementation of certain sub-functions?
+#' @param use.Rust Use Rust implementation of certain sub-functions?
 #' @param debug.return Return function workspace objects before end of function.
 #' Supported values include "before est.AA.inner", "after est.AA.inner",
 #' "before est.cdf.and.mixing.prop.inner", and "after est.cdf.and.mixing.prop.inner"
@@ -44,7 +44,7 @@ bjr <- function(
   estimate.mean.sd = TRUE,
   estimate.cdf = TRUE,
   estimate.mixing.prop = TRUE,
-  use.C = FALSE,
+  use.Rust = FALSE,
   debug.return = "never",
   debug.output.to.csv = FALSE,
   control = list(cluster.threads = NULL)
@@ -117,7 +117,7 @@ bjr <- function(
   G = Re(diag(1 / diag(G[1:K,1:K])))
   W = G %*% t(V[, 1:K])
   
-  AA <- est.AA(II, M, g, y, basis, use.C, debug.return, debug.output.to.csv,
+  AA <- est.AA(II, M, g, y, basis, use.Rust, debug.return, debug.output.to.csv,
     ya, yb, basis.indic, control)
   
   if (debug.return %in% c("before est.AA.inner", "after est.AA.inner")) {
@@ -146,7 +146,7 @@ bjr <- function(
   if ((estimate.cdf) & (estimate.mixing.prop)) {
   
     cdf.and.mixing.prop <- est.cdf.and.mixing.prop(cdf.points,
-      M, K, II, N, U, W, g, y, basis, use.C, debug.return, debug.output.to.csv,
+      M, K, II, N, U, W, g, y, basis, use.Rust, debug.return, debug.output.to.csv,
       ya, yb, basis.indic, control)
     
     if (debug.return %in% c("before est.cdf.and.mixing.prop.inner",
@@ -420,7 +420,7 @@ est.A <- function(y, II, M, N, g.m, basis, ya, yb, basis.indic, control) {
 
 
 
-est.AA <- function(II, M, g, y, basis, use.C, debug.return, debug.output.to.csv,
+est.AA <- function(II, M, g, y, basis, use.Rust, debug.return, debug.output.to.csv,
   ya, yb, basis.indic, control) {
   
   ## ESTIMATION OF A1,A2,...,AI AND JOINT EIGENVECTORS U
@@ -445,8 +445,8 @@ est.AA <- function(II, M, g, y, basis, use.C, debug.return, debug.output.to.csv,
   # If Chebychev, then g() will need to do floating point operations with ii,
   # so convert now. If indicator function as basis, keep as integer
   
-  if (use.C) {
-    est.AA.inner <- est.AA.inner.C
+  if (use.Rust) {
+    est.AA.inner <- est.AA.inner.Rust
   } else {
     est.AA.inner <- est.AA.inner.R
   }
@@ -580,9 +580,24 @@ est.AA.inner.R <- function(II, Combn.M, Combn.M.nrow, g.precompute, precompute.i
 }
 
 
-est.AA.inner.C <- function(II, Combn.M, Combn.M.nrow, g.precompute, precompute.ind) {
+est.AA.inner.Rust <- function(II, Combn.M, Combn.M.nrow, g.precompute, precompute.ind) {
   
-  # Implement est.AA.inner.R() in C
+  g.dim <- dim(g.precompute)
+  
+  matrix.ind <- matrix(1:(prod(g.dim[1:2])),
+    nrow = g.dim[1], ncol = g.dim[2])
+  
+  matrix.ind <- matrix.ind - 1L
+  Combn.M <- Combn.M - 1L
+  precompute.ind <- precompute.ind - 1L
+  # Rust indexes from 0
+  
+  dim(g.precompute) <- c(g.dim[1] * g.dim[2], g.dim[3])
+  
+  y <- est_aa_inner_rust(II, Combn.M, Combn.M.nrow, g.precompute,
+    precompute.ind, matrix.ind, g.dim[1], g.dim[2], g.dim[3]) 
+  
+  y / ncol(g.precompute)
   
 }
 
@@ -591,7 +606,7 @@ est.AA.inner.C <- function(II, Combn.M, Combn.M.nrow, g.precompute, precompute.i
 
 
 est.cdf.and.mixing.prop <- function(cdf.points, M, K, II, N, U, W, g, y, basis,
-  use.C, debug.return, debug.output.to.csv, ya, yb, basis.indic, control) {
+  use.Rust, debug.return, debug.output.to.csv, ya, yb, basis.indic, control) {
   # cdf.points is an ordered set of floats. In final version, the length will be 20-100
   # M is an integer. It is the "ring size". So it will be 11 for pre-hardfork and 16 for post-hardfork data
   # K is an integer. It is the number of distribution components to be estimated. It is supposed to 
@@ -620,8 +635,8 @@ est.cdf.and.mixing.prop <- function(cdf.points, M, K, II, N, U, W, g, y, basis,
   # If Chebychev, then g() will need to do floating point operations with ii, so convert now.
   # If indicator function as basis, keep as integer
   
-  if (use.C) {
-    est.cdf.and.mixing.prop.inner <- est.cdf.and.mixing.prop.inner.C
+  if (use.Rust) {
+    est.cdf.and.mixing.prop.inner <- est.cdf.and.mixing.prop.inner.Rust
   } else {
     est.cdf.and.mixing.prop.inner <- est.cdf.and.mixing.prop.inner.R
   }
@@ -884,12 +899,26 @@ est.cdf.and.mixing.prop.inner.R <- function(
 
 
 
-est.cdf.and.mixing.prop.inner.C <- function(
+est.cdf.and.mixing.prop.inner.Rust <- function(
   y, II, K, P, L, M, N.subset, g.ind, precompute.ind, ind.3rd, g,
   basis, ii, W, W.t, U, U.t, cdf.points, ya, yb, basis.indic) {
   
-  # Implement est.cdf.and.mixing.prop.inner.R() in C
-    
+  g.ind <- g.ind - 1L
+  precompute.ind <- precompute.ind - 1L
+  ind.3rd <- ind.3rd - 1L
+  # Rust indexes from 0
+  
+  result <- est_cdf_and_mixing_prop_inner_rust(
+    y, II, K, P, L, M, N.subset, g.ind, precompute.ind, ind.3rd,
+    ii, W, W.t, U, U.t, cdf.points, ya, yb)
+  
+  B.hat <- array(0, dim = c(II, K, P))
+  
+  for (k in 1:K) {
+    B.hat[, k, ] <- result$B_hat_list[[k]]
+  }
+  
+  list(a.hat = result$a_hat, B.hat = B.hat, CDF = result$CDF)
     
 }
 

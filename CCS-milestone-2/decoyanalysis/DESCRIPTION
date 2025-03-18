@@ -1,8 +1,8 @@
 Package: decoyanalysis
 Type: Package
 Title: Separate real and decoy distributions
-Version: 0.2.0
-Date: 2025-03-16
+Version: 0.2.1
+Date: 2025-03-18
 Authors@R: 
     c(person(family = "Rucknium",
              role = c("cre", "aut", "cph"),
@@ -14,7 +14,8 @@ Authors@R:
              comment = "Original author of bjr() MATLAB implementation")
       )
 Description: Implements the Bonhomme-Jochmans-Robin (2016) and
-    Patra-Sen (2016) estimators.
+    Patra-Sen (2016) estimators. Computes the success probability
+    of the Maximum A Posteriori (MAP) Decoder attack (Aeenah et al. 2021).
 License: GPL (>= 2)
 Encoding: UTF-8
 Imports:
@@ -28,7 +29,9 @@ Imports:
   parallelly,
   Iso,
   wrswoR
+Roxygen: list(markdown = TRUE)
 RoxygenNote: 7.3.2
+Config/rextendr/version: 0.3.1
 Suggests: 
     testthat (>= 3.0.0),
     withr

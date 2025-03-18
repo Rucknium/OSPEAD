@@ -1,4 +1,4 @@
-#useDynLib(decoyanalysis, .registration=TRUE)
+useDynLib(decoyanalysis, .registration = TRUE)
 import(Matrix)
 import(data.table)
 importFrom("pracma", "eye", "pinv", "ones", "zeros", "size", "ceil", "Rank", "kron", "mldivide", "randn")

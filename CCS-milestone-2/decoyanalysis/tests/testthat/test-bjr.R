@@ -3,9 +3,9 @@ skip.R.tests <- FALSE
 
 
 
-testthat::test_that("C implementation of est.AA.inner() matches R implementation (Monte Carlo, Chebychev as basis)", {
+testthat::test_that("Rust implementation of est.AA.inner() matches R implementation (Monte Carlo, Chebychev as basis)", {
   
-  testthat::skip("C implementation of est.AA.inner() not ready")
+  # testthat::skip("Rust implementation of est.AA.inner() not ready")
   
   restore.plan <- future::plan()
   on.exit(future::plan(restore.plan))
@@ -22,11 +22,11 @@ testthat::test_that("C implementation of est.AA.inner() matches R implementation
     cdf.points = cdf.points, estimate.mean.sd = FALSE,
     debug.return = "after est.AA.inner")
   
-  bjr.validation.C <- bjr(y, II = 10, K = K, basis = "Chebychev",
+  bjr.validation.Rust <- bjr(y, II = 10, K = K, basis = "Chebychev",
     cdf.points = cdf.points, estimate.mean.sd = FALSE,
-    use.C = TRUE, debug.return = "after est.AA.inner")
+    use.Rust = TRUE, debug.return = "after est.AA.inner")
   
-  testthat::expect_equal(bjr.validation.C$B4, bjr.validation.R$B4,
+  testthat::expect_equal(bjr.validation.Rust$B4, bjr.validation.R$B4,
     tolerance = 1e-14)
   
 })
@@ -35,9 +35,9 @@ testthat::test_that("C implementation of est.AA.inner() matches R implementation
 
 
 
-testthat::test_that("C implementation of est.cdf.and.mixing.prop.inner() matches R implementation (Monte Carlo, Chebychev as basis)", {
+testthat::test_that("Rust implementation of est.cdf.and.mixing.prop.inner() matches R implementation (Monte Carlo, Chebychev as basis)", {
   
-  testthat::skip("C implementation of est.cdf.and.mixing.prop.inner() not ready")
+  # testthat::skip("Rust implementation of est.cdf.and.mixing.prop.inner() not ready")
   
   restore.plan <- future::plan()
   on.exit(future::plan(restore.plan))
@@ -54,20 +54,20 @@ testthat::test_that("C implementation of est.cdf.and.mixing.prop.inner() matches
     cdf.points = cdf.points, estimate.mean.sd = FALSE,
     debug.return = "after est.cdf.and.mixing.prop.inner")
   
-  bjr.validation.C <- bjr(y, II = 10, K = K, basis = "Chebychev",
+  bjr.validation.Rust <- bjr(y, II = 10, K = K, basis = "Chebychev",
     cdf.points = cdf.points, estimate.mean.sd = FALSE,
-    use.C = TRUE, debug.return = "after est.cdf.and.mixing.prop.inner")
+    use.Rust = TRUE, debug.return = "after est.cdf.and.mixing.prop.inner")
   
-  testthat::expect_equal(bjr.validation.C$B4, bjr.validation.R$B4,
+  testthat::expect_equal(bjr.validation.Rust$B4, bjr.validation.R$B4,
     tolerance = 1e-14)
   
 })
 
 
 
-testthat::test_that("Overall C implementation of parts of bjr() matches R implementation (Monte Carlo, Chebychev as basis)", {
+testthat::test_that("Overall Rust implementation of parts of bjr() matches R implementation (Monte Carlo, Chebychev as basis)", {
   
-  testthat::skip("Overall C implementation of parts of bjr() not ready")
+  # testthat::skip("Overall Rust implementation of parts of bjr() not ready")
   
   restore.plan <- future::plan()
   on.exit(future::plan(restore.plan))
@@ -83,11 +83,11 @@ testthat::test_that("Overall C implementation of parts of bjr() matches R implem
   bjr.validation.R <- bjr(y, II = 10, K = K, basis = "Chebychev",
     cdf.points = cdf.points, estimate.mean.sd = FALSE)
   
-  bjr.validation.C <- bjr(y, II = 10, K = K, basis = "Chebychev",
+  bjr.validation.Rust <- bjr(y, II = 10, K = K, basis = "Chebychev",
     cdf.points = cdf.points, estimate.mean.sd = FALSE,
-    use.C = TRUE)
+    use.Rust = TRUE)
   
-  testthat::expect_equal(bjr.validation.C$B4, bjr.validation.R$B4,
+  testthat::expect_equal(bjr.validation.Rust$B4, bjr.validation.R$B4,
     tolerance = 1e-14)
   
 })
