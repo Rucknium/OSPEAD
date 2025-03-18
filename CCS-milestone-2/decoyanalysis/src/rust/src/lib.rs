@@ -80,7 +80,7 @@ fn est_aa_inner_rust(
         }
     }
 
-    let v_return = RArray::new_matrix(ii_iter, combn_m_nrow, |row, col| v[row + col * ii_iter]);
+    let v_return = RArray::new_matrix(combn_m_nrow, ii_iter, |row, col| v[row + col * combn_m_nrow]);
 
     v_return
 
