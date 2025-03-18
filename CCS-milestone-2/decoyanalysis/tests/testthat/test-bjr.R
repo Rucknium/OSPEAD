@@ -26,7 +26,7 @@ testthat::test_that("Rust implementation of est.AA.inner() matches R implementat
     cdf.points = cdf.points, estimate.mean.sd = FALSE,
     use.Rust = TRUE, debug.return = "after est.AA.inner")
 
-  testthat::expect_equal(bjr.validation.C, bjr.validation.R, tolerance = 1e-14)
+  testthat::expect_equal(bjr.validation.Rust, bjr.validation.R, tolerance = 1e-14)
 
 })
 
