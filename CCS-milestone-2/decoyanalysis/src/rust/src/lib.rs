@@ -2,7 +2,7 @@ use core::f64;
 use extendr_api::prelude::*;
 use std::f64::consts::PI;
 
-fn chebychev_polynomial(i: Vec<f64>, y: f64, ya: f64, yb: f64) -> Vec<f64> {
+fn chebychev_polynomial(i: &[f64], y: f64, ya: f64, yb: f64) -> Vec<f64> {
 
     let a = 2.0 / PI;
     let b = f64::acos((y - ya) / yb);
@@ -145,7 +145,7 @@ fn est_cdf_and_mixing_prop_inner_rust(
             II,
             M,
             (0..M)
-                .flat_map(|m| chebychev_polynomial(ii.clone(), y[(n, m)], ya, yb))
+                .flat_map(|m| chebychev_polynomial(&ii, y[(n, m)], ya, yb))
                 .collect(),
         );
         // Help from https://stackoverflow.com/questions/56739169/is-there-a-way-to-write-to-a-whole-row-column-of-a-nalgebra-matrix
