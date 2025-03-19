@@ -36,7 +36,7 @@ The documents total well over 100 pages. I will suggest portions to read:
 
 - Laypeople (i.e. non-technical people) are suggested to read Sections 19 through 20 (pages 39 to 42) of ["Fully Specified Estimation Plan for OSPEAD"](CCS-milestone-1/pdf/PRIVATE-OSPEAD-Fully-Specified-Estimation-Plan.pdf) and ["Research Roadmap for an Overhaul of Monero’s Mixin Selection Algorithm"](HackerOne-submission/pdf/Roadmap-for-improved-Monero-mixin-selection-algorithm.pdf). Note that the term "mixin" in the latter document changed to "decoy" in the former document.
 
-- Programmers and/or people who prefer to read procedures are suggested to read ["Research Roadmap for an Overhaul of Monero’s Mixin Selection Algorithm"](HackerOne-submission/pdf/Roadmap-for-improved-Monero-mixin-selection-algorithm.pdf) and [OSPEAD-docs](https://rucknium.github.io/OSPEAD/CCS-milestone-2/OSPEAD-docs/_book). Note that the term for the adversary's attack changed from "Rucknium Ratio Attack" to "Maximum A Postieri (MAP) Decoder attack".
+- Programmers and/or people who prefer to read procedures are suggested to read ["Research Roadmap for an Overhaul of Monero’s Mixin Selection Algorithm"](HackerOne-submission/pdf/Roadmap-for-improved-Monero-mixin-selection-algorithm.pdf) and [OSPEAD-docs](https://rucknium.github.io/OSPEAD/CCS-milestone-2/OSPEAD-docs/_book). Note that the term for the adversary's attack changed from "Rucknium Ratio Attack" to "Maximum A Posteriori (MAP) Decoder attack".
 
 - People interested in the statistical theory underpinning OSPEAD are encouraged to read all of ["Fully Specified Estimation Plan for OSPEAD"](CCS-milestone-1/pdf/PRIVATE-OSPEAD-Fully-Specified-Estimation-Plan.pdf).
 
