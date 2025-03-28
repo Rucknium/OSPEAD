@@ -10,6 +10,10 @@
 #' @useDynLib decoyanalysis, .registration = TRUE
 NULL
 
+#' Do wallet2_gamma_cdf.
+#' @export
+wallet2_gamma_cdf <- function(x, v, z, GAMMA_SHAPE, GAMMA_RATE, RECENT_SPEND_WINDOW) .Call(wrap__wallet2_gamma_cdf, x, v, z, GAMMA_SHAPE, GAMMA_RATE, RECENT_SPEND_WINDOW)
+
 est_aa_inner_rust <- function(ii, combn_m_input, combn_m_nrow, g, precompute_ind, matrix_ind, g_dim1, g_dim2, g_dim3) .Call(wrap__est_aa_inner_rust, ii, combn_m_input, combn_m_nrow, g, precompute_ind, matrix_ind, g_dim1, g_dim2, g_dim3)
 
 est_cdf_and_mixing_prop_inner_rust <- function(y, II, K, P, L, M, N_subset, g_ind, precompute_ind, ind_3rd, ii, W, W_t, U, U_t, cdf_points, ya, yb) .Call(wrap__est_cdf_and_mixing_prop_inner_rust, y, II, K, P, L, M, N_subset, g_ind, precompute_ind, ind_3rd, ii, W, W_t, U, U_t, cdf_points, ya, yb)

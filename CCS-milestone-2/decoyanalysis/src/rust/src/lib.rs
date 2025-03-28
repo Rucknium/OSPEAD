@@ -1,6 +1,53 @@
 use core::f64;
 use extendr_api::prelude::*;
+use statrs::distribution::{ContinuousCDF, Gamma};
 use std::f64::consts::PI;
+
+/// Do wallet2_gamma_cdf.
+/// @export
+#[extendr]
+fn wallet2_gamma_cdf(
+    x: Vec<f64>,
+    v: f64,
+    z: f64,
+    GAMMA_SHAPE: f64,
+    GAMMA_RATE: f64,
+    RECENT_SPEND_WINDOW: f64,
+) -> Vec<f64> {
+    // See https://github.com/monero-project/monero/pull/9024
+    // and https://github.com/Rucknium/misc-research/blob/main/Monero-Decoy-Selection-Closed-Form/pdf/monero-decoy-selection-closed-form.pdf
+
+    let CRYPTONOTE_DEFAULT_TX_SPENDABLE_AGE = 10.0;
+    let DIFFICULTY_TARGET_V2 = 120.0;
+    let DEFAULT_UNLOCK_TIME = CRYPTONOTE_DEFAULT_TX_SPENDABLE_AGE * DIFFICULTY_TARGET_V2;
+
+    let g = Gamma::new(GAMMA_SHAPE, GAMMA_RATE).unwrap();
+
+    let z_v = z * v;
+    let x_v: Vec<f64> = x.iter().map(|&e| e * v).collect();
+    let cdf_z_v = g.cdf(f64::ln(z * v));
+    let cdf_DUT = g.cdf(f64::ln(DEFAULT_UNLOCK_TIME));
+
+    let mut result = Vec::with_capacity(x.len());
+
+    for i in x_v.iter() {
+        if &RECENT_SPEND_WINDOW < i && i <= &z_v {
+            result.push(g.cdf(f64::ln(i + DEFAULT_UNLOCK_TIME)) / cdf_z_v)
+        } else if &0.0 <= i && i <= &RECENT_SPEND_WINDOW {
+            let y = (g.cdf(f64::ln(i + DEFAULT_UNLOCK_TIME)) - cdf_DUT
+                + (i / RECENT_SPEND_WINDOW) * cdf_DUT)
+                / cdf_z_v;
+            result.push(y)
+        } else if i < &0.0 {
+            result.push(0.0)
+        } else {
+            // i > z case
+            result.push(1.0)
+        }
+    }
+
+    result
+}
 
 fn chebychev_polynomial(i: &[f64], y: f64, ya: f64, yb: f64) -> Vec<f64> {
 
@@ -235,6 +282,7 @@ fn est_cdf_and_mixing_prop_inner_rust(
 // See corresponding C code in `entrypoint.c`.
 extendr_module! {
     mod decoyanalysis;
+    fn wallet2_gamma_cdf;
     fn est_aa_inner_rust;
     fn est_cdf_and_mixing_prop_inner_rust;
 }

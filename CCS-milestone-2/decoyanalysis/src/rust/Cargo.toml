@@ -1,6 +1,6 @@
 [package]
 name = 'r_decoyanalysis'
-version = '0.2.1'
+version = '0.3.0'
 edition = '2021'
 
 [lib]
@@ -10,3 +10,4 @@ name = 'r_decoyanalysis'
 [dependencies]
 extendr-api = '*'
 nalgebra = "0.33.2"
+statrs = "0.18.0"
