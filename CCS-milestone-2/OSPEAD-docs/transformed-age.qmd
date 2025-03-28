@@ -69,13 +69,16 @@ calculate_num_usable_rct_outputs <- function(crod) {
 
 
 dsa.to.uniform <- function(x, block.height, crod, start_height.RingCT, output.index.only.locked, OBOE.prop) {
-# dsa.to.uniform <- function(x, block.height, crod, output.index.only.locked) {
 
   CRYPTONOTE_DEFAULT_TX_SPENDABLE_AGE = 10
   DIFFICULTY_TARGET_V2 = 120
 
   SECONDS_IN_A_YEAR =  60 * 60 * 24 * 365
   BLOCKS_IN_A_YEAR = SECONDS_IN_A_YEAR / DIFFICULTY_TARGET_V2
+
+  # See https://github.com/monero-project/monero/pull/9024
+  # and https://github.com/Rucknium/misc-research/blob/main/Monero-Decoy-Selection-Closed-Form/pdf/monero-decoy-selection-closed-form.pdf
+
 
   calculate_average_output_flow <- function(crod) {
     # 1
@@ -125,22 +128,28 @@ dsa.to.uniform <- function(x, block.height, crod, start_height.RingCT, output.in
   DEFAULT_UNLOCK_TIME = CRYPTONOTE_DEFAULT_TX_SPENDABLE_AGE * DIFFICULTY_TARGET_V2
   RECENT_SPEND_WINDOW = 15 * DIFFICULTY_TARGET_V2
 
-  G <- function(x) {
-    actuar::plgamma(x, shapelog = GAMMA_SHAPE, ratelog = GAMMA_RATE)
-  }
+  # G <- function(x) {
+  #   actuar::plgamma(x, shapelog = GAMMA_SHAPE, ratelog = GAMMA_RATE)
+  # }
+  #
+  # G_star <- function(x) {
+  #   (0 <= x*v & x*v <= 1800) *
+  #     (G(x*v + 1200) - G(1200) +
+  #         ( (x*v)/(1800) ) * G(1200)
+  #     )/G(z*v) +
+  #     (1800 < x*v & x*v <= z*v) * G(x*v + 1200)/G(z*v) +
+  #     (z*v < x*v) * 1
+  # }
 
   G_star <- function(x) {
-    (0 <= x*v & x*v <= 1800) *
-      (G(x*v + 1200) - G(1200) +
-          ( (x*v)/(1800) ) * G(1200)
-      )/G(z*v) +
-      (1800 < x*v & x*v <= z*v) * G(x*v + 1200)/G(z*v) +
-      (z*v < x*v) * 1
+    decoyanalysis::wallet2_gamma_cdf(as.numeric(x), v, z,
+      GAMMA_SHAPE, GAMMA_RATE, RECENT_SPEND_WINDOW)
+    # Rust code
   }
 
 
   crod.reversed <- abs(diff(rev(c(0, crod.at.tx.construction))))[-(1:(CRYPTONOTE_DEFAULT_TX_SPENDABLE_AGE-1))]
-  # Remove first 10 blocks before cumsum() since can't spend from those outputs
+  # Remove first 9 blocks before cumsum() since can't spend from those outputs
 
   unspendable.indices <- output.index.only.locked[
     (output.index.only.locked$output_index + 1L) <= as.integer(num_usable_rct_outputs) &
@@ -156,36 +165,36 @@ dsa.to.uniform <- function(x, block.height, crod, start_height.RingCT, output.in
   #if (OBOE.prop != 1) {
   if (TRUE) {
 
-  crod.reversed <- cumsum(crod.reversed[crod.reversed > 0])
+    crod.reversed <- cumsum(crod.reversed[crod.reversed > 0])
 
-  crod.reversed <- c(0, crod.reversed)
-  # Concatenate zero since the CDF should start at 0
+    crod.reversed <- c(0, crod.reversed)
+    # Concatenate zero since the CDF should start at 0
 
-  y_0 <- crod.reversed[-length(crod.reversed)] + 1
-  y_1 <- crod.reversed[-1]
-  dsa.pmf <- (G_star(y_1 + 1) - G_star(y_0)) / (y_1 + 1 - y_0)
+    y_0 <- crod.reversed[-length(crod.reversed)] + 1
+    y_1 <- crod.reversed[-1]
+    dsa.pmf.correct <- (G_star(y_1 + 1) - G_star(y_0)) / (y_1 + 1 - y_0)
 
-  dsa.pmf <- rep(dsa.pmf, times = diff(crod.reversed))
-  dsa.pmf[length(dsa.pmf)] <- dsa.pmf[length(dsa.pmf) - 1]
-  # Replace oldest output's mass by the penultimate one since
-  # it is calculated as a negative mass otherwise
-
-
-  # output.index.only.locked <- copy(output.index.only.locked)
+    dsa.pmf.correct <- rep(dsa.pmf.correct, times = diff(crod.reversed))
+    dsa.pmf.correct[length(dsa.pmf.correct)] <- dsa.pmf.correct[length(dsa.pmf.correct) - 1]
+    # Replace oldest output's mass by the penultimate one since
+    # it is calculated as a negative mass otherwise
 
 
+    # output.index.only.locked <- copy(output.index.only.locked)
 
-  # sum.of.unspendable.mass <- sum(dsa.pmf[unspendable.indices])
 
 
-  dsa.pmf[unspendable.indices] <- 0
+    # sum.of.unspendable.mass <- sum(dsa.pmf[unspendable.indices])
 
-#  dsa.pmf <- dsa.pmf[ support.endpoints[1]:support.endpoints[2] ]
 
-  dsa.pmf.correct <- dsa.pmf
-  # dsa.pmf.correct <- dsa.pmf/sum(dsa.pmf)
-  # dsa.pmf <- dsa.pmf * 1/(1 - sum.of.unspendable.mass)
-  #  dsa.cdf.correct <- cumsum(dsa.pmf)
+    dsa.pmf.correct[unspendable.indices] <- 0
+
+    #  dsa.pmf <- dsa.pmf[ support.endpoints[1]:support.endpoints[2] ]
+
+    # dsa.pmf.correct <- dsa.pmf
+    # dsa.pmf.correct <- dsa.pmf/sum(dsa.pmf)
+    # dsa.pmf <- dsa.pmf * 1/(1 - sum.of.unspendable.mass)
+    #  dsa.cdf.correct <- cumsum(dsa.pmf)
   }
 
 
@@ -205,29 +214,36 @@ dsa.to.uniform <- function(x, block.height, crod, start_height.RingCT, output.in
   y_1 <- crod.reversed[-1]
   dsa.pmf <- (G_star(y_1 + 1) - G_star(y_0)) / (y_1 + 1 - y_0)
 
-  dsa.pmf <- rep(dsa.pmf, times = diff(crod.reversed))
+  dsa.pmf <- rep(c(0, dsa.pmf), times = c(first.post.unlock.block, diff(crod.reversed)))
   dsa.pmf[length(dsa.pmf)] <- dsa.pmf[length(dsa.pmf) - 1]
 
-  dsa.pmf <- c(rep(0, first.post.unlock.block), dsa.pmf)
+  # dsa.pmf <- c(rep(0, first.post.unlock.block), dsa.pmf)
 
   dsa.pmf[unspendable.indices] <- 0
 
-#  dsa.pmf <- dsa.pmf[ support.endpoints[1]:support.endpoints[2] ]
+  #  dsa.pmf <- dsa.pmf[ support.endpoints[1]:support.endpoints[2] ]
 
   #if (OBOE.prop != 1) {
   if (TRUE) {
 
-  dsa.pmf.OBOE <- dsa.pmf
+    # dsa.pmf.OBOE <- dsa.pmf
 
-  # gc()
+    # gc()
 
-  dsa.pmf <- OBOE.prop * dsa.pmf.OBOE + (1 - OBOE.prop) * dsa.pmf.correct
-  rm(dsa.pmf.OBOE, dsa.pmf.correct)
+    # dsa.pmf <- OBOE.prop * dsa.pmf.OBOE + (1 - OBOE.prop) * dsa.pmf.correct
+    collapse::setop(dsa.pmf, "*", OBOE.prop)
+    collapse::setop(dsa.pmf.correct, "*", 1 - OBOE.prop)
+    collapse::setop(dsa.pmf, "+", dsa.pmf.correct)
+    # rm(dsa.pmf.OBOE, dsa.pmf.correct)
   }
 
-  dsa.pmf <- dsa.pmf / sum(dsa.pmf)
+  # dsa.pmf <- dsa.pmf / sum(dsa.pmf)
+  collapse::setop(dsa.pmf, "/", collapse::fsum(dsa.pmf))
 
-  dsa.cdf <- cumsum(dsa.pmf)
+  dsa.cdf <- cumsum(dsa.pmf[1:max(x)])
+  # Only need to compute up to the maximum x index
+  # Maybe there is a way to speed this up even more by not generating the
+  # full cumsum vector
 
   return(list(transformed.data = dsa.cdf[x], pmf.contribution = dsa.pmf, v = v, z = z))
 
