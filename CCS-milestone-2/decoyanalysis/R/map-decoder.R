@@ -107,42 +107,39 @@ map.decoder.success.prob <- function(f_S, f_D, n.decoys, subsample = 1,
   
   cut.vector <- f_S/f_D
   # rm(f_S)
-  names(cut.vector) <- as.character(1:length(cut.vector))
   
   y <- data.table(f_D = f_D, cut.vector.var = cut.vector)
   
   setorder(y, cut.vector.var)
   
-  cut.vector <- sort(cut.vector)
-  cut.vector.unique <- cut.vector[!duplicated(cut.vector)]
-  # Using duplicated() keeps names. unique() does not keep names.
-  cut.vector.name.unique <- as.integer(names(cut.vector.unique))
+  cut.vector.copied <- cut.vector
+  cut.vector <- data.table(cut.vector = cut.vector, cut.vector.ind = seq_along(cut.vector))
+  cut.vector <- collapse::funique(cut.vector, cols = "cut.vector", sort = TRUE)
   
-  y[, cut.vector.cut := cut.vector.name.unique[
-    .bincode(cut.vector.var, c(-1, cut.vector.unique), right = FALSE)] ]
+  y[, `:=`(cut.vector.cut, cut.vector$cut.vector.ind[.bincode(cut.vector.var,
+    c(-1, cut.vector$cut.vector), right = FALSE)])]
   
   setorder(y, cut.vector.var)
   y[, cut.vector.var := NULL]
   
   y[, f_D := cumsum(f_D)]
   rm(f_D)
-  y <- y[, .(success.prob = f_D[.N]), by = cut.vector.cut]
+  y <- collapse::flast(y, collapse::GRP(y, by = "cut.vector.cut"))
+  setnames(y, "f_D", "success.prob")
   
-  y <- merge(y, data.table(cut.vector.cut = cut.vector.name.unique,
-    cut.vector = cut.vector.unique))
-  rm(cut.vector.name.unique)
+  y <- merge(y, data.table(cut.vector.cut = cut.vector$cut.vector.ind,
+    cut.vector = cut.vector$cut.vector))
   y[, cut.vector.cut := NULL]
   
-  y <- merge(y, data.table(cut.vector.cut.names = as.integer(names(cut.vector)),
-    cut.vector = unname(cut.vector)),
-    all = TRUE, by = "cut.vector")
+  y <- merge(y, data.table(cut.vector.cut.names = seq_along(cut.vector.copied),
+    cut.vector = unname(cut.vector.copied)), all = TRUE, by = "cut.vector")
   y[, cut.vector := NULL]
   setorder(y, cut.vector.cut.names)
   y[, cut.vector.cut.names := NULL]
   
   setDF(y)
   
-  y$success.prob[is.na(y$success.prob)] <- 0
+  y$success.prob <- collapse::replace_na(y$success.prob, value = 0)
   # At the point(s) where f_S/f_D is at a minimum, the attack would always
   # choose another block height, so the attack success probability is zero
   
