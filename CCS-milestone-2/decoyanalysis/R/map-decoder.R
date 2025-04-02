@@ -12,6 +12,9 @@
 #' `wrswoR::sample_int_expj()`. Recommended not to go below 0.1. Alternatively,
 #' a vector of support points. This alternative specification can be used
 #' if the user desires to specify the support subsample directly.
+#' @param rounding.digit Optional. If specified, round an intermediate
+#' vector to the nearest digit. Helps speed up computation, with minimal
+#' loss of accuracy of the final result. Setting to 5 seems to work well.
 #' @param return.only.success.probability.vector If TRUE, returns only the
 #' `success.probability.vector` object
 #' 
@@ -65,7 +68,7 @@
 #' print(result$mean.success.probability)
 #' 
 map.decoder.success.prob <- function(f_S, f_D, n.decoys, subsample = 1,
-  return.only.success.probability.vector = FALSE) {
+  rounding.digit = NULL, return.only.success.probability.vector = FALSE) {
   
   stopifnot(length(f_S) == length(f_D))
   
@@ -107,6 +110,9 @@ map.decoder.success.prob <- function(f_S, f_D, n.decoys, subsample = 1,
   
   cut.vector <- f_S/f_D
   # rm(f_S)
+  if (!is.null(rounding.digit)) {
+    cut.vector <- Rfast::Round(cut.vector, digit = rounding.digit)
+  }
   
   y <- data.table(f_D = f_D, cut.vector.var = cut.vector)
   

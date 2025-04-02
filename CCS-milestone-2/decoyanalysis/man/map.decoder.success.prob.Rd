@@ -9,6 +9,7 @@ map.decoder.success.prob(
   f_D,
   n.decoys,
   subsample = 1,
+  rounding.digit = NULL,
   return.only.success.probability.vector = FALSE
 )
 }
@@ -26,6 +27,10 @@ by weighted random sampling without replacement, using the implementation of
 \code{wrswoR::sample_int_expj()}. Recommended not to go below 0.1. Alternatively,
 a vector of support points. This alternative specification can be used
 if the user desires to specify the support subsample directly.}
+
+\item{rounding.digit}{Optional. If specified, round an intermediate
+vector to the nearest digit. Helps speed up computation, with minimal
+loss of accuracy of the final result. Setting to 5 seems to work well.}
 
 \item{return.only.success.probability.vector}{If TRUE, returns only the
 \code{success.probability.vector} object}

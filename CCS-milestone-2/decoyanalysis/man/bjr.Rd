@@ -13,7 +13,7 @@ bjr(
   estimate.mean.sd = TRUE,
   estimate.cdf = TRUE,
   estimate.mixing.prop = TRUE,
-  use.C = FALSE,
+  use.Rust = FALSE,
   debug.return = "never",
   debug.output.to.csv = FALSE,
   control = list(cluster.threads = NULL)
@@ -36,7 +36,7 @@ bjr(
 
 \item{estimate.mixing.prop}{Estimate mixing proportions?}
 
-\item{use.C}{Use C implementation of certain sub-functions?}
+\item{use.Rust}{Use Rust implementation of certain sub-functions?}
 
 \item{debug.return}{Return function workspace objects before end of function.
 Supported values include "before est.AA.inner", "after est.AA.inner",
