@@ -1,7 +1,7 @@
 Package: decoyanalysis
 Type: Package
 Title: Separate real and decoy distributions
-Version: 0.4.0
+Version: 0.4.1
 Date: 2025-04-13
 Authors@R: 
     c(person(family = "Rucknium",
