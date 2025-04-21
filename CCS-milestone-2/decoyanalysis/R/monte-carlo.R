@@ -338,7 +338,7 @@ gen.nonfungible.rings <- function(draw.my.dsa, draw.their.dsa, draw.real.spend,
   
   antecedent.ring.distribution <- array(antecedent.ring.distribution, dim = antecedent.ring.distribution.dims)
   
-  antecedent.ring.distribution <- apply(antecedent.ring.distribution, 2, "c")
+  antecedent.ring.distribution <- apply(antecedent.ring.distribution, 3, "c")
   
   antecedent.ring.distribution <- Rfast::rowSort(antecedent.ring.distribution)
   
@@ -464,7 +464,7 @@ gen.old.new.dsa.rings <- function(n.rings, beta, old.dsa, new.dsa, real.spend,
     check.data.sorted = check.data.sorted)
   
   message("Generating new-DSA rings...")
-  rings.new <- gen.nonfungible.rings(draw.my.dsa = new.dsa, draw.their.dsa = new.dsa,
+  rings.new <- gen.nonfungible.rings(draw.my.dsa = new.dsa, draw.their.dsa = old.dsa,
     draw.real.spend = real.spend, n = ring.size, beta = beta,
     C = change.probability, n.rings = n.rings.new,
     check.data.sorted = check.data.sorted)
