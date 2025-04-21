@@ -1,3 +1,4 @@
+#![allow(non_snake_case)]
 use core::f64;
 use extendr_api::prelude::*;
 use statrs::distribution::{ContinuousCDF, Gamma};
@@ -180,11 +181,11 @@ fn est_cdf_and_mixing_prop_inner_rust(
 
     let mut B_hat= Vec::with_capacity(K);
     
-    for i in 0..K {
+    for _i in 0..K {
         B_hat.push(na::DMatrix::zeros(II, P));
     }
 
-    let mut CDF = na::DMatrix::from_fn(K, L, |row, col| 0.0);
+    let mut CDF = na::DMatrix::from_fn(K, L, |_row, _col| 0.0);
 
     for n in 0..N_subset {
         
@@ -242,7 +243,7 @@ fn est_cdf_and_mixing_prop_inner_rust(
                 na::DMatrix::from_fn(II, P, |row, col| g_precompute[(row, ind_3rd[col])]);
 
             let tauP_expanded =
-                DMatrix::from_vec(P, II, (0..II).flat_map(|m| tauP.clone()).collect());
+                DMatrix::from_vec(P, II, (0..II).flat_map(|_m| tauP.clone()).collect());
 
             B_hat[k] = B_hat[k].clone() + &tauP_expanded.transpose().component_mul(&basis_3rd);
 
